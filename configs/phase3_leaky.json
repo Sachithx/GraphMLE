@@ -1,0 +1,8 @@
+{
+  "nodes": [
+    {"id": "load", "type": "data.synthetic", "params": {}},
+    {"id": "leaky", "type": "features.leaky_same_row", "params": {}, "inputs": ["load"]},
+    {"id": "model", "type": "model.marker", "params": {}, "inputs": ["leaky"]}
+  ],
+  "meta": {"name": "phase3_deliberately_leaky", "hypothesis_id": "guard_test"}
+}

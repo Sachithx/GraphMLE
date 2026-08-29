@@ -1,0 +1,7 @@
+{
+  "nodes": [
+    {"id": "load", "type": "data.load", "params": {}},
+    {"id": "broken", "type": "model.does_not_exist", "params": {}, "inputs": ["load"]}
+  ],
+  "meta": {"name": "phase3_deliberately_broken", "hypothesis_id": "sandbox_test"}
+}

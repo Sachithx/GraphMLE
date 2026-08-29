@@ -13,6 +13,7 @@ from typing import Any
 import numpy as np
 
 from eval.official import evaluate_official
+from guards.leakage import LeakageGuard
 
 from .graph import OperatorGraph
 from .registry import OperatorRegistry, default_registry
@@ -105,6 +106,11 @@ def execute_graph(
 ) -> ExecutionResult:
     registry = registry or default_registry()
     order = graph.validate(registry)
+    leakage_guard = (
+        LeakageGuard(ctx.run_log_path or ctx.output_dir / "run_log.jsonl")
+        if ctx.leakage_guard_enabled
+        else None
+    )
     start = time.monotonic()
     outputs: dict[str, Any] = {}
     for node in order:
@@ -117,6 +123,8 @@ def execute_graph(
             raise TypeError(
                 f"operator {node.id} returned {type(value).__name__}, expected {expected.__name__}"
             )
+        if leakage_guard is not None and isinstance(value, FeatureBundle):
+            leakage_guard.check_feature_bundle(value, node_id=node.id)
         outputs[node.id] = value
     terminal = outputs[order[-1].id]
     prediction = _prediction_from_terminal(terminal)
@@ -130,6 +138,8 @@ def execute_graph(
                 prediction.scores[split],
                 starter_kit_dir=ctx.starter_kit_dir,
             )
+            if leakage_guard is not None and split == "valid":
+                leakage_guard.check_metrics(metrics[split], node_id=prediction.name)
     elapsed = time.monotonic() - start
     ctx.output_dir.mkdir(parents=True, exist_ok=True)
     (ctx.output_dir / "graph.json").write_text(json.dumps(graph.to_dict(), indent=2))

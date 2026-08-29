@@ -9,7 +9,13 @@ from typing import Any, Callable
 import numpy as np
 import pandas as pd
 
-from .types import DataBundle, ExecutionContext, FeatureBundle
+from .types import (
+    DataBundle,
+    ExecutionContext,
+    FeatureBundle,
+    FeatureLineage,
+    TemporalScope,
+)
 
 
 SPLITS = {
@@ -269,6 +275,7 @@ def _historical_feature_bundle(
     name: str,
     params: dict[str, Any],
     builder: FeatureBuilder,
+    sources: frozenset[str],
 ) -> FeatureBundle:
     build_ctx = FeatureBuildContext(params=params)
     history = data.frames["train"]
@@ -281,7 +288,13 @@ def _historical_feature_bundle(
             data.frames[split]["row_id"]
         ):
             raise RuntimeError(f"feature {name} violated the row-alignment contract on {split}")
-    return FeatureBundle(name, frames, (), data)
+    lineage = FeatureLineage(sources, TemporalScope.STRICTLY_EARLIER)
+    provenance = {
+        column: lineage
+        for column in frames["train"].columns
+        if column != "row_id"
+    }
+    return FeatureBundle(name, frames, (), data, provenance)
 
 
 def _require_data(inputs: list[Any]) -> DataBundle:
@@ -312,7 +325,16 @@ def op_raw_categorical(
                 ).astype(str),
             }
         )
-    return FeatureBundle("raw_categorical", frames, columns, data)
+    provenance = {
+        "cat_user_id": FeatureLineage(frozenset({"user_id"}), TemporalScope.SAME_ROW),
+        "cat_video_id": FeatureLineage(frozenset({"video_id"}), TemporalScope.SAME_ROW),
+        "cat_author_id": FeatureLineage(frozenset({"author_id"}), TemporalScope.STATIC),
+        "cat_tab": FeatureLineage(frozenset({"tab"}), TemporalScope.SAME_ROW),
+        "cat_dur_bucket": FeatureLineage(
+            frozenset({"duration_ms"}), TemporalScope.STATIC
+        ),
+    }
+    return FeatureBundle("raw_categorical", frames, columns, data, provenance)
 
 
 def op_item_popularity(
@@ -320,7 +342,11 @@ def op_item_popularity(
 ) -> FeatureBundle:
     del ctx
     return _historical_feature_bundle(
-        _require_data(inputs), "item_popularity", params, build_item_popularity
+        _require_data(inputs),
+        "item_popularity",
+        params,
+        build_item_popularity,
+        frozenset({"date", "video_id", "long_view"}),
     )
 
 
@@ -333,6 +359,7 @@ def op_user_category_affinity(
         "user_category_affinity",
         params,
         build_user_category_affinity,
+        frozenset({"date", "user_id", "tag", "long_view"}),
     )
 
 
@@ -341,7 +368,11 @@ def op_user_history(
 ) -> FeatureBundle:
     del ctx
     return _historical_feature_bundle(
-        _require_data(inputs), "user_history", params, build_user_history
+        _require_data(inputs),
+        "user_history",
+        params,
+        build_user_history,
+        frozenset({"date", "user_id", "long_view"}),
     )
 
 
@@ -363,8 +394,16 @@ def op_video_duration(
                 "cat_video_duration_bucket": np.searchsorted(edges, duration).astype(str),
             }
         )
+    provenance = {
+        "video_duration_log_ms": FeatureLineage(
+            frozenset({"duration_ms"}), TemporalScope.STATIC
+        ),
+        "cat_video_duration_bucket": FeatureLineage(
+            frozenset({"duration_ms"}), TemporalScope.STATIC
+        ),
+    }
     return FeatureBundle(
-        "video_duration", frames, ("cat_video_duration_bucket",), data
+        "video_duration", frames, ("cat_video_duration_bucket",), data, provenance
     )
 
 
@@ -386,9 +425,21 @@ def op_temporal(
                 "cat_temporal_hour": (hourmin // 100).astype(str),
             }
         )
+    provenance = {
+        "temporal_day_index": FeatureLineage(
+            frozenset({"date"}), TemporalScope.SAME_ROW
+        ),
+        "cat_temporal_weekday": FeatureLineage(
+            frozenset({"date"}), TemporalScope.SAME_ROW
+        ),
+        "cat_temporal_hour": FeatureLineage(
+            frozenset({"hourmin"}), TemporalScope.SAME_ROW
+        ),
+    }
     return FeatureBundle(
         "temporal",
         frames,
         ("cat_temporal_weekday", "cat_temporal_hour"),
         data,
+        provenance,
     )
