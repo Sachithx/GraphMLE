@@ -1,9 +1,13 @@
 .DS_Store
 .env
 .venv/
+/.venv-linux/
+/.venv-phase5/
+/keys.env
 __pycache__/
 *.py[cod]
 .pytest_cache/
+._*
 
 # Downloaded competition assets and generated run artifacts.
 data/kuairand-pure/

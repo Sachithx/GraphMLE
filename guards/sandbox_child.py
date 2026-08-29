@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import ctypes
 import os
-import resource
 import signal
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 
 class _ProcTaskInfo(ctypes.Structure):
@@ -71,19 +71,37 @@ def _terminate_group(process: subprocess.Popen[bytes] | subprocess.Popen[str]) -
         process.wait()
 
 
-def _linux_memory_limiter(limit_bytes: int):
-    if not limit_bytes:
-        return None
+def _linux_process_tree(pid: int) -> set[int]:
+    pending = [pid]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        children_path = Path(f"/proc/{current}/task/{current}/children")
+        try:
+            pending.extend(int(value) for value in children_path.read_text().split())
+        except (FileNotFoundError, PermissionError, ProcessLookupError, ValueError):
+            continue
+    return seen
 
-    def apply_limit() -> None:
-        resource.setrlimit(resource.RLIMIT_AS, (limit_bytes, limit_bytes))
 
-    return apply_limit
+def _linux_rss_bytes(pid: int) -> int:
+    total_kib = 0
+    for process_id in _linux_process_tree(pid):
+        try:
+            for line in Path(f"/proc/{process_id}/status").read_text().splitlines():
+                if line.startswith("VmRSS:"):
+                    total_kib += int(line.split()[1])
+                    break
+        except (FileNotFoundError, PermissionError, ProcessLookupError, ValueError):
+            continue
+    return total_kib * 1024
 
 
 def _run_supervised(command: list[str], limit_bytes: int, timeout_s: float) -> int:
-    limiter = _linux_memory_limiter(limit_bytes) if sys.platform != "darwin" else None
-    process = subprocess.Popen(command, preexec_fn=limiter, start_new_session=True)
+    process = subprocess.Popen(command, start_new_session=True)
     start = time.monotonic()
     while process.poll() is None:
         if time.monotonic() - start > timeout_s:
@@ -101,6 +119,18 @@ def _run_supervised(command: list[str], limit_bytes: int, timeout_s: float) -> i
         ):
             print(
                 f"[sandbox] memory limit exceeded: {limit_bytes // (1024 * 1024)} MB",
+                file=sys.stderr,
+                flush=True,
+            )
+            _terminate_group(process)
+            return 137
+        if (
+            sys.platform.startswith("linux")
+            and limit_bytes
+            and _linux_rss_bytes(process.pid) > limit_bytes
+        ):
+            print(
+                f"[sandbox] memory limit exceeded: {limit_bytes // (1024 * 1024)} MB RSS",
                 file=sys.stderr,
                 flush=True,
             )

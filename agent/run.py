@@ -366,8 +366,16 @@ class AgentRunner:
         )
 
     def run(self) -> dict[str, Any]:
-        if self.run_dir.exists() and any(self.run_dir.iterdir()):
-            raise FileExistsError(f"run directory is not empty: {self.run_dir}")
+        if self.run_dir.exists():
+            unexpected = [
+                path.name
+                for path in self.run_dir.iterdir()
+                if path.name != "console.log" or not path.is_file()
+            ]
+            if unexpected:
+                raise FileExistsError(
+                    f"run directory contains prior artifacts: {self.run_dir} ({unexpected})"
+                )
         self.run_dir.mkdir(parents=True, exist_ok=True)
         (self.run_dir / "interventions.jsonl").touch()
         (self.run_dir / "generated_features").mkdir()

@@ -271,9 +271,18 @@ def _train_torch(
     seed = int(params.get("seed", ctx.seed))
     torch.manual_seed(seed)
     torch.set_num_threads(int(params.get("threads", 4)))
-    device_name = str(params.get("device", "cpu"))
+    device_name = str(params.get("device", "auto"))
+    if device_name == "auto":
+        if torch.cuda.is_available():
+            device_name = "cuda"
+        elif torch.backends.mps.is_available():
+            device_name = "mps"
+        else:
+            device_name = "cpu"
     if device_name == "mps" and not torch.backends.mps.is_available():
         device_name = "cpu"
+    if device_name.startswith("cuda") and not torch.cuda.is_available():
+        raise RuntimeError("CUDA was requested but is not available")
     device = torch.device(device_name)
     categorical_indices = list(prepared.categorical_indices)
     numeric_indices = [
