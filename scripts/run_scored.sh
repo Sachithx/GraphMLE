@@ -14,13 +14,17 @@ if [[ -f .env ]]; then
 fi
 
 export CUDA_VISIBLE_DEVICES="$GPU_INDEX"
-.venv/bin/python -m scripts.phase5_preflight \
+if [[ -x .venv-linux/bin/python ]]; then
+  PYTHON_BIN=".venv-linux/bin/python"
+else
+  PYTHON_BIN="${TECHJAM_PYTHON:-.venv/bin/python}"
+fi
+"$PYTHON_BIN" -m scripts.phase5_preflight \
   --config "$CONFIG" \
   --require-gpus 1 \
   --output "runs/${RUN_ID}_preflight.json"
 
 mkdir -p "runs/$RUN_ID"
 set -o pipefail
-.venv/bin/python -m agent.run --config "$CONFIG" --run-id "$RUN_ID" \
+"$PYTHON_BIN" -m agent.run --config "$CONFIG" --run-id "$RUN_ID" \
   2>&1 | tee "runs/$RUN_ID/console.log"
-
