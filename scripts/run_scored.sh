@@ -30,6 +30,7 @@ else
 fi
 
 export CUDA_VISIBLE_DEVICES="$GPU_INDEX"
+export PYTHONUNBUFFERED="${PYTHONUNBUFFERED:-1}"
 "$PYTHON" -m scripts.phase5_preflight \
   --config "$CONFIG" \
   --require-gpus 1 \
