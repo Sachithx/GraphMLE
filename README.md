@@ -111,3 +111,37 @@ three distinct official validation scores plus three checker-valid submissions.
 The FM-equivalent starting point for later agent phases is
 `configs/pipeline_seed.json`. Results are written to
 `runs/phase2/results.json`.
+
+## Phase 3 guards
+
+Every feature column now carries explicit source and temporal lineage. Before a
+model node can run, `guards/leakage.py` rejects:
+
+- same-row use of `is_click`, `play_time_ms`, `is_like`, `is_follow`,
+  `is_comment`, `is_forward`, `long_view`, and the other impression outcomes;
+- generated feature columns with missing lineage;
+- randomized-exposure features that cannot prove their source rows end on or
+  before the training cutoff (`20220421`).
+
+Prior-date aggregates of those outcomes remain valid, and the multi-task model
+accesses them through the explicitly checked auxiliary-label path rather than as
+features. Validation primary above 0.80 triggers a separate empirical leakage
+rejection. Every rejection is appended to the run JSONL before raising.
+
+`guards/sandbox.py` captures combined stdout/stderr, enforces a wall-clock
+timeout (900 seconds by default), and caps memory with `RLIMIT_AS` on Linux or
+supervised-process RSS monitoring on macOS. A structured result is written beside the
+stdout log for both success and failure.
+
+Candidate acceptance uses a strict 2σ threshold of 0.0016. A smaller raw delta
+can pass only after exactly three seed runs whose mean improves on the incumbent
+and where at least two seeds improve.
+
+Run the Phase 3 gate with:
+
+```bash
+make phase3-gate
+```
+
+It proves that a deliberately leaky graph is rejected before its model callback,
+and that a deliberately broken graph is contained and logged by the sandbox.

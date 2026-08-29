@@ -270,7 +270,12 @@ def _train_torch(
     hidden_dim = int(params.get("hidden_dim", 64))
     task_columns = ["long_view"]
     if multitask:
-        requested = params.get("auxiliary_targets", list(AUXILIARY_TARGETS))
+        from guards.leakage import LeakageGuard
+
+        requested = list(params.get("auxiliary_targets", list(AUXILIARY_TARGETS)))
+        LeakageGuard(ctx.run_log_path or ctx.output_dir / "run_log.jsonl").check_auxiliary_targets(
+            requested
+        )
         task_columns.extend(column for column in requested if column in AUXILIARY_TARGETS)
 
     class TorchRecModel(nn.Module):

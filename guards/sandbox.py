@@ -41,16 +41,15 @@ def run_in_sandbox(
     timed_out = False
     returncode: int | None = None
     status = "failed"
-    launched_command = list(command)
-    if memory_limit_mb is not None:
-        wrapper = Path(__file__).with_name("sandbox_child.py")
-        launched_command = [
-            str(Path(sys.executable)),
-            str(wrapper),
-            str(int(memory_limit_mb)),
-            "--",
-            *launched_command,
-        ]
+    wrapper = Path(__file__).with_name("sandbox_child.py")
+    launched_command = [
+        str(Path(sys.executable)),
+        str(wrapper),
+        str(int(memory_limit_mb or 0)),
+        str(float(timeout_s)),
+        "--",
+        *list(command),
+    ]
     with stdout_path.open("w") as output:
         try:
             completed = subprocess.run(
@@ -59,11 +58,12 @@ def run_in_sandbox(
                 stdout=output,
                 stderr=subprocess.STDOUT,
                 text=True,
-                timeout=timeout_s,
+                timeout=timeout_s + 5,
                 check=False,
             )
             returncode = completed.returncode
-            status = "success" if returncode == 0 else "failed"
+            timed_out = returncode == 124
+            status = "timed_out" if timed_out else ("success" if returncode == 0 else "failed")
         except subprocess.TimeoutExpired:
             timed_out = True
             status = "timed_out"
