@@ -29,9 +29,13 @@ dry_run_hypotheses:
     expected_delta: 0.012
     expected_cost_minutes: 8
     patch:
-      op: replace_params
-      node: model
-      params: {seed: 0, objective: lambdarank, num_leaves: 63, lr: 0.05, n_estimators: 400, group_by: user_id}
+      op: add_node
+      replace_node: model
+      node:
+        id: model
+        type: model.lightgbm_rank
+        params: {seed: 0, objective: lambdarank, num_leaves: 63, lr: 0.05, n_estimators: 400, group_by: user_id}
+        inputs: [raw]
   - id: dry_002_multitask
     target_node: model
     rationale: Use same-row outcomes only as auxiliary targets.
@@ -39,9 +43,13 @@ dry_run_hypotheses:
     expected_delta: 0.009
     expected_cost_minutes: 12
     patch:
-      op: replace_params
-      node: model
-      params: {seed: 0, auxiliary_targets: [is_click, is_like, is_follow]}
+      op: add_node
+      replace_node: model
+      node:
+        id: model
+        type: model.torch_multitask
+        params: {seed: 0, auxiliary_targets: [is_click, is_like, is_follow]}
+        inputs: [raw]
   - id: dry_003_duration
     target_node: raw
     rationale: Add a static duration view without outcome leakage.
@@ -55,6 +63,8 @@ dry_run_hypotheses:
         type: features.video_duration
         params: {buckets: 10}
         inputs: [load]
+      consumers: [model]
+      consumer_mode: append
   - id: dry_004_tuning
     target_node: model
     rationale: Refine capacity after larger objective changes.

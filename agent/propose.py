@@ -37,6 +37,9 @@ class ReplaceParamsPatch(StrictModel):
 class AddNodePatch(StrictModel):
     op: Literal["add_node"]
     node: NodeDefinition
+    replace_node: str | None = None
+    consumers: list[str] = Field(default_factory=list)
+    consumer_mode: Literal["append", "replace"] = "append"
 
 
 class RemoveNodePatch(StrictModel):
@@ -78,6 +81,109 @@ class Hypothesis(StrictModel):
     expected_delta: float
     expected_cost_minutes: PositiveFloat
     patch: Patch
+
+
+ParameterValue = Union[
+    str,
+    int,
+    float,
+    bool,
+    list[str],
+    list[int],
+    list[float],
+    list[bool],
+    None,
+]
+
+
+class ParameterEntry(StrictModel):
+    name: str = Field(min_length=1)
+    value: ParameterValue
+
+
+class LLMNodeDefinition(StrictModel):
+    id: str = Field(min_length=1, pattern=r"^[A-Za-z][A-Za-z0-9_]*$")
+    type: str = Field(min_length=1)
+    params: list[ParameterEntry]
+    inputs: list[str]
+
+
+class LLMReplaceParamsPatch(StrictModel):
+    op: Literal["replace_params"]
+    node: str = Field(min_length=1)
+    params: list[ParameterEntry]
+
+
+class LLMAddNodePatch(StrictModel):
+    op: Literal["add_node"]
+    node: LLMNodeDefinition
+    replace_node: str | None
+    consumers: list[str]
+    consumer_mode: Literal["append", "replace"]
+
+
+class LLMRemoveNodePatch(StrictModel):
+    op: Literal["remove_node"]
+    node: str = Field(min_length=1)
+
+
+class LLMRewirePatch(StrictModel):
+    op: Literal["rewire"]
+    node: str = Field(min_length=1)
+    inputs: list[str]
+
+
+class LLMRegisterFeaturePatch(StrictModel):
+    op: Literal["register_feature"]
+    node: LLMNodeDefinition
+    code: str = Field(min_length=1)
+    sources: list[str] = Field(min_length=1)
+    temporal_scope: Literal["strictly_earlier", "same_row", "static"]
+
+
+LLMPatch = Annotated[
+    Union[
+        LLMReplaceParamsPatch,
+        LLMAddNodePatch,
+        LLMRemoveNodePatch,
+        LLMRewirePatch,
+        LLMRegisterFeaturePatch,
+    ],
+    Field(discriminator="op"),
+]
+
+
+class LLMHypothesis(StrictModel):
+    """API wire schema: maps are encoded as entries to remain strict-JSON compatible."""
+
+    id: str = Field(min_length=1)
+    target_node: str = Field(min_length=1)
+    rationale: str = Field(min_length=1)
+    method_source: str = Field(min_length=1)
+    expected_delta: float
+    expected_cost_minutes: PositiveFloat
+    patch: LLMPatch
+
+    def to_runtime(self) -> Hypothesis:
+        raw = self.model_dump(mode="json")
+        patch = raw["patch"]
+        if "params" in patch:
+            patch["params"] = _parameter_entries_to_dict(patch["params"])
+        if isinstance(patch.get("node"), dict):
+            patch["node"]["params"] = _parameter_entries_to_dict(
+                patch["node"]["params"]
+            )
+        return Hypothesis.model_validate(raw)
+
+
+def _parameter_entries_to_dict(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for entry in entries:
+        name = str(entry["name"])
+        if name in result:
+            raise ValueError(f"duplicate parameter name: {name}")
+        result[name] = entry["value"]
+    return result
 
 
 SYSTEM_PROMPT = """You are the hypothesis proposer inside an autonomous ML research harness.
@@ -128,11 +234,11 @@ class LiveHypothesisProposer:
             "scheduler_preferred_target": preferred_target,
         }
         result = self.client.parse(
-            Hypothesis,
+            LLMHypothesis,
             instructions=SYSTEM_PROMPT,
             input_text=json.dumps(context, sort_keys=True),
         )
-        return ProposalResult(result.value, result.usage)
+        return ProposalResult(result.value.to_runtime(), result.usage)
 
 
 class CannedHypothesisProposer:
@@ -252,9 +358,31 @@ def apply_hypothesis(
             raise GraphValidationError(f"replace_params target does not exist: {patch.node}")
         by_id[patch.node]["params"] = patch.params
     elif patch.op == "add_node":
-        if patch.node.id in by_id:
+        if patch.node.id in by_id and patch.replace_node != patch.node.id:
             raise GraphValidationError(f"add_node id already exists: {patch.node.id}")
+        if patch.replace_node is not None:
+            if patch.replace_node not in by_id:
+                raise GraphValidationError(
+                    f"add_node replacement does not exist: {patch.replace_node}"
+                )
+            nodes[:] = [node for node in nodes if node["id"] != patch.replace_node]
+            if patch.node.id != patch.replace_node:
+                for node in nodes:
+                    node["inputs"] = [
+                        patch.node.id if value == patch.replace_node else value
+                        for value in node["inputs"]
+                    ]
         nodes.append(patch.node.model_dump())
+        for consumer_id in patch.consumers:
+            consumer = next(
+                (node for node in nodes if node["id"] == consumer_id), None
+            )
+            if consumer is None:
+                raise GraphValidationError(f"add_node consumer does not exist: {consumer_id}")
+            if patch.consumer_mode == "replace":
+                consumer["inputs"] = [patch.node.id]
+            elif patch.node.id not in consumer["inputs"]:
+                consumer["inputs"].append(patch.node.id)
     elif patch.op == "remove_node":
         if patch.node not in by_id:
             raise GraphValidationError(f"remove_node target does not exist: {patch.node}")

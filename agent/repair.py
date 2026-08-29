@@ -8,7 +8,7 @@ from pipeline.graph import OperatorGraph
 from pipeline.registry import OperatorRegistry
 
 from .llm import StructuredClient, TokenUsage
-from .propose import Hypothesis, apply_hypothesis
+from .propose import Hypothesis, LLMHypothesis, apply_hypothesis
 
 
 Metrics = dict[str, float]
@@ -56,7 +56,7 @@ class LLMRepairProvider:
             "failing_graph": graph.to_dict(),
         }
         result = self.client.parse(
-            Hypothesis,
+            LLMHypothesis,
             instructions=(
                 "Repair the failing bounded graph patch. Return one of the five allowed "
                 "patch operations, make the smallest change that addresses the traceback, "
@@ -65,7 +65,9 @@ class LLMRepairProvider:
             input_text=json.dumps(payload, sort_keys=True),
         )
         self.usage = self.usage + result.usage
-        return apply_hypothesis(graph, result.value, self.registry).graph
+        return apply_hypothesis(
+            graph, result.value.to_runtime(), self.registry
+        ).graph
 
 
 @dataclass(frozen=True)

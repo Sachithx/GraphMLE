@@ -104,3 +104,31 @@ def test_registered_feature_cannot_read_same_row_target_outcome(tmp_path) -> Non
             default_registry(),
             generated_feature_dir=tmp_path,
         )
+
+
+def test_add_node_can_atomically_replace_a_model_without_changing_its_id() -> None:
+    hypothesis = Hypothesis.model_validate(
+        {
+            "id": "h_rank",
+            "target_node": "model",
+            "rationale": "Switch objective in one valid candidate.",
+            "method_source": "LambdaRank",
+            "expected_delta": 0.01,
+            "expected_cost_minutes": 8,
+            "patch": {
+                "op": "add_node",
+                "replace_node": "model",
+                "node": {
+                    "id": "model",
+                    "type": "model.lightgbm_rank",
+                    "params": {"objective": "lambdarank"},
+                    "inputs": ["raw"],
+                },
+            },
+        }
+    )
+    mutation = apply_hypothesis(seed_graph(), hypothesis, default_registry())
+    mutation.graph.validate(default_registry())
+    model = next(node for node in mutation.graph.nodes if node.id == "model")
+    assert model.type == "model.lightgbm_rank"
+    assert mutation.topology_changed

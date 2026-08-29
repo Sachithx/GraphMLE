@@ -214,6 +214,15 @@ def neutralize_node(
     return neutral
 
 
+def with_model_seed(graph: OperatorGraph, seed: int) -> OperatorGraph:
+    raw = graph.to_dict()
+    for node in raw["nodes"]:
+        if str(node["type"]).startswith("model."):
+            node["params"] = {**node["params"], "seed": int(seed)}
+    raw["meta"] = {**raw.get("meta", {}), "significance_seed": int(seed)}
+    return OperatorGraph.from_dict(raw)
+
+
 class ProductionEvaluator:
     def __init__(
         self,
@@ -284,7 +293,7 @@ class ProductionEvaluator:
     ) -> list[float]:
         return [
             self.evaluate(
-                graph,
+                with_model_seed(graph, seed),
                 output_dir / f"seed_{seed}",
                 incumbent_primary=incumbent_primary,
                 seed=seed,

@@ -126,7 +126,11 @@ def execute_graph(
         if leakage_guard is not None and isinstance(value, FeatureBundle):
             leakage_guard.check_feature_bundle(value, node_id=node.id)
         outputs[node.id] = value
-    terminal = outputs[order[-1].id]
+    submit_nodes = [node for node in order if node.type.startswith("submit.")]
+    if len(submit_nodes) > 1:
+        raise ValueError("graph must not contain multiple submission nodes")
+    terminal_node = submit_nodes[0] if submit_nodes else order[-1]
+    terminal = outputs[terminal_node.id]
     prediction = _prediction_from_terminal(terminal)
     metrics: dict[str, dict[str, float]] = {}
     if prediction is not None:
