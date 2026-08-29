@@ -136,6 +136,90 @@ def _load_kit_runtime(ctx: ExecutionContext) -> tuple[Any, Any]:
     return kit_data, baseline
 
 
+def _augment_fm_encoding(
+    bundles: list[FeatureBundle],
+    encoded: dict[str, tuple[np.ndarray, np.ndarray, list[Any]]],
+    dimension: int,
+    *,
+    numeric_bins: int,
+) -> tuple[dict[str, tuple[np.ndarray, np.ndarray, list[Any]]], int]:
+    """Append every non-canonical feature bundle as a sparse FM field.
+
+    The starter FM consumes integer ids for one-hot fields. Categorical columns
+    therefore receive a train-fitted vocabulary, while continuous columns are
+    converted to train-fitted quantile tokens. The built-in raw categorical
+    bundle is already represented exactly by the starter kit's five fields and
+    is not duplicated.
+    """
+
+    if numeric_bins < 2:
+        raise ValueError("FM numeric_bins must be at least 2")
+    frames, categorical_columns = _merge_features(bundles)
+    base_columns = {
+        column
+        for bundle in bundles
+        if bundle.name == "raw_categorical"
+        for column in bundle.frames["train"].columns
+        if column != "row_id"
+    }
+    feature_columns = [
+        column
+        for column in frames["train"].columns
+        if column != "row_id" and column not in base_columns
+    ]
+    categorical_set = set(categorical_columns)
+    additions: dict[str, list[np.ndarray]] = {split: [] for split in frames}
+    next_offset = int(dimension)
+
+    for column in feature_columns:
+        if column in categorical_set:
+            train_values = frames["train"][column].astype("string").fillna("UNK")
+            categories = pd.Index(pd.unique(train_values))
+            field_dimension = len(categories) + 1
+            for split, frame in frames.items():
+                codes = pd.Categorical(
+                    frame[column].astype("string").fillna("UNK"),
+                    categories=categories,
+                ).codes
+                codes = np.where(codes < 0, len(categories), codes)
+                additions[split].append((codes + next_offset).astype(np.int32))
+        else:
+            train_values = (
+                pd.to_numeric(frames["train"][column], errors="coerce")
+                .replace([np.inf, -np.inf], np.nan)
+            )
+            median = float(train_values.median()) if train_values.notna().any() else 0.0
+            clean_train = train_values.fillna(median).to_numpy(dtype=np.float64)
+            edges = np.unique(
+                np.quantile(
+                    clean_train,
+                    np.linspace(0.0, 1.0, numeric_bins + 1)[1:-1],
+                )
+            )
+            field_dimension = len(edges) + 1
+            for split, frame in frames.items():
+                values = (
+                    pd.to_numeric(frame[column], errors="coerce")
+                    .replace([np.inf, -np.inf], np.nan)
+                    .fillna(median)
+                    .to_numpy(dtype=np.float64)
+                )
+                codes = np.searchsorted(edges, values, side="right")
+                additions[split].append((codes + next_offset).astype(np.int32))
+        next_offset += field_dimension
+
+    if not feature_columns:
+        return encoded, int(dimension)
+    augmented = {}
+    for split, (matrix, labels, users) in encoded.items():
+        augmented[split] = (
+            np.column_stack([matrix, *additions[split]]).astype(np.int32, copy=False),
+            labels,
+            users,
+        )
+    return augmented, next_offset
+
+
 def op_fm_baseline(
     inputs: list[Any], params: dict[str, Any], ctx: ExecutionContext
 ) -> PredictionBundle:
@@ -143,6 +227,12 @@ def op_fm_baseline(
     data = bundles[0].data
     kit_data, baseline = _load_kit_runtime(ctx)
     encoded, dimension = kit_data.encode(data.official_splits)
+    encoded, dimension = _augment_fm_encoding(
+        bundles,
+        encoded,
+        dimension,
+        numeric_bins=int(params.get("numeric_bins", 32)),
+    )
     x_train, y_train, _ = encoded["train"]
     x_valid, y_valid, users_valid = encoded["valid"]
     seed = int(params.get("seed", ctx.seed))

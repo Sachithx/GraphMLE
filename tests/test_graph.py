@@ -62,6 +62,16 @@ def test_valid_graph_has_stable_topological_order() -> None:
     ]
 
 
+def test_unused_output_fails_before_execution() -> None:
+    raw = valid_graph()
+    raw["nodes"].insert(
+        2,
+        {"id": "discarded", "type": "feature", "inputs": ["load"]},
+    )
+    with pytest.raises(GraphValidationError, match="unused node outputs.*discarded"):
+        OperatorGraph.from_dict(raw).validate(tiny_registry())
+
+
 @pytest.mark.parametrize(
     ("mutate", "message"),
     [

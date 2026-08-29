@@ -123,4 +123,22 @@ class OperatorGraph:
             if error:
                 raise GraphValidationError(f"node {node.id} {error}")
             output_types[node.id] = spec.output_type
+
+        submit_nodes = [node for node in ordered if node.type.startswith("submit.")]
+        if len(submit_nodes) > 1:
+            raise GraphValidationError("graph must not contain multiple submission nodes")
+        terminal = submit_nodes[0] if submit_nodes else ordered[-1]
+        used = {terminal.id}
+        pending = list(terminal.inputs)
+        while pending:
+            node_id = pending.pop()
+            if node_id in used:
+                continue
+            used.add(node_id)
+            pending.extend(by_id[node_id].inputs)
+        unused = [node.id for node in self.nodes if node.id not in used]
+        if unused:
+            raise GraphValidationError(
+                f"unused node outputs do not reach terminal {terminal.id!r}: {unused}"
+            )
         return tuple(ordered)

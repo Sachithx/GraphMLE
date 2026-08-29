@@ -110,6 +110,7 @@ OPERATOR_PARAMETERS: dict[str, dict[str, str]] = {
         "patience": "int, default 4",
         "k": "int, default 16",
         "l2": "float, default 1e-6",
+        "numeric_bins": "int, default 32, train-fitted quantile bins for numeric feature fields",
     },
     "model.lightgbm_binary": {
         "seed": "int",
