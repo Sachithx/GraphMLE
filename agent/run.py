@@ -62,7 +62,10 @@ class EvaluationConfig(ConfigModel):
 
 class LLMConfig(ConfigModel):
     mode: Literal["live", "canned"] = "live"
-    model: str = "gpt-5.4"
+    model: str = "gpt-5.6-terra"
+    repair_model: str = "gpt-5.6-luna"
+    reasoning_effort: Literal["none", "low", "medium", "high", "xhigh"] = "low"
+    repair_reasoning_effort: Literal["none", "low", "medium", "high", "xhigh"] = "low"
     max_retries: int = 3
     hypotheses: list[Hypothesis] = Field(default_factory=list)
 
@@ -330,11 +333,17 @@ class AgentRunner:
             if not hypotheses:
                 raise ValueError("canned mode requires hypotheses")
             return CannedHypothesisProposer(hypotheses), None
-        client = OpenAIStructuredClient(
+        proposal_client = OpenAIStructuredClient(
             model=self.config.llm.model,
             max_retries=self.config.llm.max_retries,
+            reasoning_effort=self.config.llm.reasoning_effort,
         )
-        return LiveHypothesisProposer(client), client
+        repair_client = OpenAIStructuredClient(
+            model=self.config.llm.repair_model,
+            max_retries=self.config.llm.max_retries,
+            reasoning_effort=self.config.llm.repair_reasoning_effort,
+        )
+        return LiveHypothesisProposer(proposal_client), repair_client
 
     def _evaluator(self) -> Evaluator:
         if self.config.evaluation.mode == "synthetic":
@@ -359,8 +368,13 @@ class AgentRunner:
         proposer, structured_client = self._proposer()
         evaluator = self._evaluator()
         loop = self.config.loop
+        effective_max_iterations = loop.max_iterations
+        if self.dry_run:
+            effective_max_iterations = min(
+                effective_max_iterations, len(self.config.dry_run_hypotheses)
+            )
         scheduler = AgentScheduler(
-            max_iterations=loop.max_iterations,
+            max_iterations=effective_max_iterations,
             max_wall_clock_s=loop.max_wall_clock_s,
             convergence_window=loop.convergence_window,
             convergence_delta=loop.convergence_delta,

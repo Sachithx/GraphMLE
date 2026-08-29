@@ -10,6 +10,7 @@ from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveFloat
 
+from guards.leakage import FORBIDDEN_SAME_ROW
 from pipeline.graph import GraphValidationError, OperatorGraph
 from pipeline.registry import OperatorRegistry
 
@@ -175,7 +176,13 @@ def topology_signature(graph: OperatorGraph) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _validate_feature_code(code: str) -> None:
+def _root_name(node: ast.AST) -> str | None:
+    while isinstance(node, (ast.Attribute, ast.Subscript)):
+        node = node.value
+    return node.id if isinstance(node, ast.Name) else None
+
+
+def _validate_feature_code(code: str, declared_sources: list[str]) -> None:
     try:
         tree = ast.parse(code)
     except SyntaxError as exc:
@@ -191,6 +198,31 @@ def _validate_feature_code(code: str) -> None:
     if [argument.arg for argument in positional] != ["train_df", "target_df", "ctx"]:
         raise GraphValidationError(
             "generated build signature must be build(train_df, target_df, ctx)"
+        )
+    target_columns: set[str] = set()
+    for node in ast.walk(builds[0]):
+        if isinstance(node, ast.Subscript) and _root_name(node.value) == "target_df":
+            target_columns.update(
+                child.value
+                for child in ast.walk(node.slice)
+                if isinstance(child, ast.Constant) and isinstance(child.value, str)
+            )
+        if (
+            isinstance(node, ast.Attribute)
+            and _root_name(node.value) == "target_df"
+            and not node.attr.startswith("_")
+            and (node.attr in FORBIDDEN_SAME_ROW or node.attr in declared_sources)
+        ):
+            target_columns.add(node.attr)
+    forbidden = sorted(target_columns.intersection(FORBIDDEN_SAME_ROW))
+    if forbidden:
+        raise GraphValidationError(
+            f"generated feature reads forbidden same-row target columns: {forbidden}"
+        )
+    undeclared = sorted(target_columns - set(declared_sources) - {"row_id"})
+    if undeclared:
+        raise GraphValidationError(
+            f"generated feature target columns are missing from sources: {undeclared}"
         )
 
 
@@ -238,7 +270,7 @@ def apply_hypothesis(
             raise GraphValidationError(f"feature node id already exists: {patch.node.id}")
         if patch.node.type != "features.generated":
             raise GraphValidationError("registered feature node type must be features.generated")
-        _validate_feature_code(patch.code)
+        _validate_feature_code(patch.code, patch.sources)
         generated_feature_dir.mkdir(parents=True, exist_ok=True)
         generated_file = generated_feature_dir / f"{patch.node.id}.py"
         generated_file.write_text(patch.code)

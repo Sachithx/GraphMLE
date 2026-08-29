@@ -459,10 +459,22 @@ def op_generated_feature(
         raise TypeError("generated feature module must expose callable build")
     build_ctx = FeatureBuildContext(params=dict(params.get("builder_params", {})))
     history = data.frames["train"]
-    frames = {
-        split: builder(history, target, build_ctx)
-        for split, target in data.frames.items()
-    }
+    scope = TemporalScope(str(params["temporal_scope"]))
+    frames: dict[str, pd.DataFrame] = {}
+    for split, target in data.frames.items():
+        if scope == TemporalScope.STRICTLY_EARLIER:
+            pieces = []
+            for date in sorted(pd.unique(target[build_ctx.date_column])):
+                target_piece = target.loc[target[build_ctx.date_column] == date]
+                eligible_history = history.loc[history[build_ctx.date_column] < date]
+                pieces.append(builder(eligible_history, target_piece, build_ctx))
+            built = pd.concat(pieces, ignore_index=True)
+            expected_ids = target["row_id"].tolist()
+            if "row_id" not in built or built["row_id"].duplicated().any():
+                raise RuntimeError(f"generated feature produced invalid row_id on {split}")
+            frames[split] = built.set_index("row_id").reindex(expected_ids).reset_index()
+        else:
+            frames[split] = builder(history, target, build_ctx)
     for split, frame in frames.items():
         if not isinstance(frame, pd.DataFrame):
             raise TypeError("generated build must return a pandas DataFrame")
@@ -472,7 +484,6 @@ def op_generated_feature(
             data.frames[split]["row_id"].reset_index(drop=True)
         ):
             raise RuntimeError(f"generated feature violated row alignment on {split}")
-    scope = TemporalScope(str(params["temporal_scope"]))
     source_log = SourceLog(str(params.get("source_log", "standard")))
     max_source_date = params.get("max_source_date")
     lineage = FeatureLineage(

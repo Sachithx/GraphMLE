@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -10,9 +11,12 @@ from agent.run import ROOT, run_from_config
 
 def run_gate(output_root: Path | None = None) -> dict[str, Any]:
     root = (output_root or ROOT / "runs" / "phase4_gate").resolve()
+    run_id = "unattended_5_iterations_" + datetime.now(timezone.utc).strftime(
+        "%Y%m%dT%H%M%S%fZ"
+    )
     summary, run_dir = run_from_config(
         ROOT / "configs" / "phase4_gate.yaml",
-        run_id="unattended_5_iterations",
+        run_id=run_id,
         run_root=root,
     )
     records = [
@@ -66,4 +70,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

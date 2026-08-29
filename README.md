@@ -145,3 +145,55 @@ make phase3-gate
 
 It proves that a deliberately leaky graph is rejected before its model callback,
 and that a deliberately broken graph is contained and logged by the sandbox.
+
+## Phase 4 autonomous loop
+
+The harness and the scored run are separate. The production entry point is:
+
+```bash
+python -m agent.run --config configs/run.yaml --run-id final_01
+```
+
+It initializes the FM-equivalent seed graph, caches node-level ablations by
+topology, requests one schema-constrained hypothesis, validates and executes the
+candidate in the Phase 3 sandbox, makes at most three bounded repair attempts,
+applies the 2σ/three-seed significance rule, accepts or reverts, and then checks
+the iteration, wall-clock, and three-small-delta convergence limits. The
+proposer receives only the graph, ablation evidence, ten recent outcomes, and
+rejected hypothesis IDs—never raw competition data.
+
+Live proposals use OpenAI Responses structured outputs with the strict Pydantic
+`Hypothesis` schema. `configs/run.yaml` uses `gpt-5.6-terra` at low reasoning for
+proposals and the cheaper `gpt-5.6-luna` for repairs. The API key is read only
+from `OPENAI_API_KEY`; it is never stored in configuration. Exact input/output
+token usage is copied from each API response into the iteration and cumulative
+logs.
+
+Free-form generation is limited to `register_feature`. Its source must define
+exactly `build(train_df, target_df, ctx)`, while its declared source columns and
+temporal scope become mandatory Phase 3 lineage. All other proposals are typed
+parameter or topology mutations: `replace_params`, `add_node`, `remove_node`,
+and `rewire`.
+
+Use the deterministic acceptance gate to exercise the orchestration without an
+API call or model training:
+
+```bash
+make phase4-gate
+```
+
+It runs five consecutive unattended iterations with canned hypotheses ordered
+by expected effect size. One hypothesis deliberately fails and is recovered on
+the first repair attempt; the final two small deltas are rejected after their
+three-seed checks. The gate requires zero interventions, zero tokens, a complete
+JSONL record for every iteration, and the four per-iteration artifacts. Its
+result is written under `runs/phase4_gate/` (gitignored).
+
+`--dry-run` swaps live proposal and repair calls for canned hypotheses while
+retaining the evaluator selected by the config. Use `configs/phase4_gate.yaml`
+when both proposal and evaluation must be synthetic. Synthetic metrics are
+marked and exist only to verify loop control; they are never competition results.
+
+During a scored run, append every manual action to the run's
+`interventions.jsonl` with a timestamp, action, and reason. The runner creates
+the file but never silently claims that later human actions did not happen.

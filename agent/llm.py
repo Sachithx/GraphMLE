@@ -50,6 +50,7 @@ class OpenAIStructuredClient:
         model: str,
         max_retries: int = 3,
         retry_delay_s: float = 1.0,
+        reasoning_effort: str = "low",
         client: object | None = None,
     ) -> None:
         if client is None:
@@ -60,6 +61,7 @@ class OpenAIStructuredClient:
         self.model = model
         self.max_retries = int(max_retries)
         self.retry_delay_s = float(retry_delay_s)
+        self.reasoning_effort = reasoning_effort
 
     def parse(
         self,
@@ -76,6 +78,7 @@ class OpenAIStructuredClient:
                     instructions=instructions,
                     input=input_text,
                     text_format=schema,
+                    reasoning={"effort": self.reasoning_effort},
                 )
                 parsed = response.output_parsed
                 if parsed is None:
@@ -93,4 +96,3 @@ class OpenAIStructuredClient:
                 if attempt < self.max_retries:
                     time.sleep(self.retry_delay_s * attempt)
         raise RuntimeError(f"structured model request failed after {self.max_retries} attempts") from last_error
-

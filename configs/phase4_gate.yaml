@@ -14,7 +14,10 @@ evaluation:
   baseline_primary: 0.6016
 llm:
   mode: canned
-  model: gpt-5.4
+  model: gpt-5.6-terra
+  repair_model: gpt-5.6-luna
+  reasoning_effort: low
+  repair_reasoning_effort: low
   max_retries: 3
   hypotheses:
     - id: h_001_induced_recovery
@@ -67,4 +70,3 @@ llm:
         op: replace_params
         node: model
         params: {seed: 5}
-
