@@ -1,0 +1,12 @@
+.DS_Store
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Downloaded competition assets and generated run artifacts.
+data/kuairand-pure/
+data/starter-kit/
+runs/*
+!runs/.gitkeep
