@@ -447,24 +447,81 @@ def _train_torch(
         weight_decay=float(params.get("weight_decay", 1e-6)),
     )
     loss_function = nn.BCEWithLogitsLoss()
-    model.train()
-    for _epoch in range(int(params.get("epochs", 3))):
-        for batch_x, batch_y in loader:
-            optimizer.zero_grad(set_to_none=True)
-            loss = loss_function(model(batch_x.to(device)), batch_y.to(device))
-            loss.backward()
-            optimizer.step()
+    if multitask:
+        # Long-view is the scored task; auxiliaries only regularize the shared trunk.
+        weights = [1.0] + [
+            float(params.get("auxiliary_weight", 0.3)) for _ in task_columns[1:]
+        ]
+        task_weights = torch.tensor(weights, device=device).view(1, -1)
+    else:
+        task_weights = None
 
-    model.eval()
-    scores: dict[str, np.ndarray] = {}
     prediction_batch = int(params.get("prediction_batch_size", 65_536))
-    with torch.no_grad():
-        for split, values in prepared.arrays.items():
-            chunks = []
+
+    def predict(values: np.ndarray) -> np.ndarray:
+        chunks = []
+        with torch.no_grad():
             for start in range(0, len(values), prediction_batch):
                 batch = torch.from_numpy(values[start : start + prediction_batch]).to(device)
                 chunks.append(model(batch)[:, 0].cpu().numpy())
-            scores[split] = np.concatenate(chunks).astype(np.float64)
+        return np.concatenate(chunks).astype(np.float64)
+
+    # Mirror the FM operator: checkpoint on validation primary rather than trusting
+    # the final epoch, so a longer budget cannot silently overfit. Synthetic fixtures
+    # ship no evaluator and no validation rows, so fall back to a plain fixed-epoch
+    # loop instead of making the operator unusable without the starter kit.
+    valid_frame = prepared.data.frames["valid"]
+    checkpointing = (
+        len(valid_frame) > 0
+        and (prepared.data.starter_kit_dir / "evaluate.py").is_file()
+    )
+    valid_users = valid_frame["user_id"].astype(str).tolist()
+    valid_labels = valid_frame["long_view"].to_numpy()
+    patience = int(params.get("patience", 3))
+    best_primary = -np.inf
+    best_state = None
+    bad_epochs = 0
+    for _epoch in range(int(params.get("epochs", 3))):
+        model.train()
+        for batch_x, batch_y in loader:
+            optimizer.zero_grad(set_to_none=True)
+            logits = model(batch_x.to(device))
+            targets = batch_y.to(device)
+            if task_weights is None:
+                loss = loss_function(logits, targets)
+            else:
+                per_task = nn.functional.binary_cross_entropy_with_logits(
+                    logits, targets, reduction="none"
+                )
+                loss = (per_task * task_weights).mean()
+            loss.backward()
+            optimizer.step()
+        if not checkpointing:
+            continue
+        model.eval()
+        metrics = evaluate_official(
+            valid_users,
+            valid_labels,
+            predict(prepared.arrays["valid"]),
+            starter_kit_dir=prepared.data.starter_kit_dir,
+        )
+        if metrics["primary"] > best_primary + 1e-5:
+            best_primary = metrics["primary"]
+            bad_epochs = 0
+            best_state = {
+                key: value.detach().cpu().clone() for key, value in model.state_dict().items()
+            }
+        else:
+            bad_epochs += 1
+            if bad_epochs >= patience:
+                break
+    if best_state is not None:
+        model.load_state_dict(best_state)
+
+    model.eval()
+    scores: dict[str, np.ndarray] = {
+        split: predict(values) for split, values in prepared.arrays.items()
+    }
     name = "torch_multitask" if multitask else "torch_deepfm"
     return PredictionBundle(name, scores, prepared.data)
 
@@ -479,3 +536,203 @@ def op_torch_multitask(
     inputs: list[Any], params: dict[str, Any], ctx: ExecutionContext
 ) -> PredictionBundle:
     return _train_torch(_require_features(inputs), params, ctx, multitask=True)
+
+
+def _set_indices(frame: pd.DataFrame, by: str) -> list[np.ndarray]:
+    """Return positional index arrays, one per ranking set."""
+    if by == "user_date":
+        keys = pd.Series(
+            list(zip(frame["user_id"].astype(str), frame["date"])), index=frame.index
+        )
+    elif by == "user":
+        keys = frame["user_id"].astype(str)
+    else:
+        raise ValueError(f"unsupported grouping {by!r}")
+    positions = np.arange(len(frame))
+    return [group.to_numpy() for _, group in pd.Series(positions).groupby(keys.to_numpy(), sort=False)]
+
+
+def op_setwise_rank(
+    inputs: list[Any], params: dict[str, Any], ctx: ExecutionContext
+) -> PredictionBundle:
+    """Permutation-equivariant setwise ranker (SetRank-style, Pang et al. SIGIR 2020).
+
+    Every other model here is a univariate scoring function: each row is scored in
+    isolation even though GAUC and nDCG@5 rank a user's impressions against each
+    other. LambdaRank changes only the loss and keeps univariate scoring, which is
+    consistent with it not beating pointwise FM on this data. This operator changes
+    the scoring function instead: a self-attention encoder scores all items in a set
+    jointly, so an item's score depends on what it is competing against.
+
+    Training groups are (user, date) co-exposure sets (mean size 5.8); inference
+    groups are the per-user impressions the metric actually ranks (mean 5.6 valid,
+    7.1 test). Those size distributions match, and attention is permutation
+    equivariant, so the encoder transfers across the two groupings. No positional
+    encoding is used: a ranking set is unordered by construction.
+    """
+    import torch
+    from torch import nn
+
+    prepared = prepare_features(_require_features(inputs))
+    seed = int(params.get("seed", ctx.seed))
+    torch.manual_seed(seed)
+    torch.set_num_threads(int(params.get("threads", 4)))
+
+    device_name = str(params.get("device", "auto"))
+    if device_name == "auto":
+        device_name = "cuda" if torch.cuda.is_available() else "cpu"
+    if device_name.startswith("cuda") and not torch.cuda.is_available():
+        raise RuntimeError("CUDA was requested but is not available")
+    device = torch.device(device_name)
+
+    categorical_indices = list(prepared.categorical_indices)
+    numeric_indices = [
+        index for index in range(len(prepared.feature_names)) if index not in categorical_indices
+    ]
+    embedding_dim = int(params.get("embedding_dim", 16))
+    d_model = int(params.get("d_model", 64))
+    n_heads = int(params.get("n_heads", 4))
+    n_layers = int(params.get("n_layers", 2))
+    dropout = float(params.get("dropout", 0.1))
+    max_set_size = int(params.get("max_set_size", 48))
+
+    class SetwiseRanker(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.embeddings = nn.ModuleList(
+                [nn.Embedding(size, embedding_dim) for size in prepared.categorical_dims]
+            )
+            input_dim = len(categorical_indices) * embedding_dim + len(numeric_indices)
+            self.input_projection = nn.Sequential(
+                nn.Linear(input_dim, d_model), nn.ReLU(), nn.Dropout(dropout)
+            )
+            layer = nn.TransformerEncoderLayer(
+                d_model=d_model,
+                nhead=n_heads,
+                dim_feedforward=d_model * 4,
+                dropout=dropout,
+                batch_first=True,
+                norm_first=True,
+            )
+            self.encoder = nn.TransformerEncoder(layer, num_layers=n_layers)
+            self.score_head = nn.Linear(d_model, 1)
+
+        def forward(self, values: Any, pad_mask: Any) -> Any:
+            # values: (batch, set, feature); pad_mask: (batch, set) True where padded.
+            cats = [
+                values[:, :, column].long().clamp(min=0, max=size - 1)
+                for column, size in zip(categorical_indices, prepared.categorical_dims)
+            ]
+            parts = [layer(cat) for layer, cat in zip(self.embeddings, cats)]
+            if numeric_indices:
+                parts.append(values[:, :, numeric_indices])
+            hidden = self.input_projection(torch.cat(parts, dim=-1))
+            # Cross-item context: each item attends over the others in its set.
+            hidden = self.encoder(hidden, src_key_padding_mask=pad_mask)
+            return self.score_head(hidden).squeeze(-1)
+
+    model = SetwiseRanker().to(device)
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=float(params.get("lr", 1e-3)),
+        weight_decay=float(params.get("weight_decay", 1e-6)),
+    )
+
+    train_frame = prepared.data.frames["train"]
+    train_labels = train_frame["long_view"].to_numpy(dtype=np.float32)
+    train_sets = _set_indices(train_frame, str(params.get("train_group", "user_date")))
+    # Only mixed-label sets carry ordering information for a listwise loss.
+    train_sets = [
+        index for index in train_sets
+        if 0 < train_labels[index].sum() < len(index)
+    ]
+    if not train_sets:
+        raise RuntimeError("no discriminative training sets available")
+
+    train_x = prepared.arrays["train"]
+    rng = np.random.default_rng(seed)
+    set_batch = int(params.get("set_batch_size", 256))
+
+    def make_batch(chunk: list[np.ndarray], values: np.ndarray, labels: np.ndarray | None):
+        width = max(len(index) for index in chunk)
+        batch_x = np.zeros((len(chunk), width, values.shape[1]), dtype=np.float32)
+        pad = np.ones((len(chunk), width), dtype=bool)
+        batch_y = np.zeros((len(chunk), width), dtype=np.float32) if labels is not None else None
+        for row, index in enumerate(chunk):
+            batch_x[row, : len(index)] = values[index]
+            pad[row, : len(index)] = False
+            if batch_y is not None:
+                batch_y[row, : len(index)] = labels[index]
+        tensors = [torch.from_numpy(batch_x), torch.from_numpy(pad)]
+        if batch_y is not None:
+            tensors.append(torch.from_numpy(batch_y))
+        return tensors
+
+    def predict_split(split: str) -> np.ndarray:
+        values = prepared.arrays[split]
+        sets = _set_indices(prepared.data.frames[split], "user")
+        out = np.zeros(len(values), dtype=np.float64)
+        model.eval()
+        with torch.no_grad():
+            # Group similar sizes together so padding stays cheap.
+            for start in range(0, len(sets), set_batch):
+                chunk = sets[start : start + set_batch]
+                batch_x, pad = make_batch(chunk, values, None)
+                logits = model(batch_x.to(device), pad.to(device)).cpu().numpy()
+                for row, index in enumerate(chunk):
+                    out[index] = logits[row, : len(index)]
+        return out
+
+    valid_users = prepared.data.frames["valid"]["user_id"].astype(str).tolist()
+    valid_labels = prepared.data.frames["valid"]["long_view"].to_numpy()
+    checkpointing = (
+        len(valid_labels) > 0 and (prepared.data.starter_kit_dir / "evaluate.py").is_file()
+    )
+    patience = int(params.get("patience", 3))
+    best_primary = -np.inf
+    best_state = None
+    bad_epochs = 0
+
+    for _epoch in range(int(params.get("epochs", 20))):
+        model.train()
+        order = rng.permutation(len(train_sets))
+        for start in range(0, len(order), set_batch):
+            chunk = []
+            for position in order[start : start + set_batch]:
+                index = train_sets[position]
+                if len(index) > max_set_size:
+                    # Subsample oversized sets; a fresh draw each epoch acts as augmentation.
+                    index = rng.choice(index, size=max_set_size, replace=False)
+                chunk.append(index)
+            batch_x, pad, batch_y = make_batch(chunk, train_x, train_labels)
+            batch_x, pad, batch_y = batch_x.to(device), pad.to(device), batch_y.to(device)
+            logits = model(batch_x, pad).masked_fill(pad, float("-inf"))
+            # Listwise softmax cross-entropy over each set (ListNet-style).
+            target = batch_y.masked_fill(pad, 0.0)
+            target = target / target.sum(dim=1, keepdim=True).clamp(min=1e-9)
+            loss = -(target * torch.log_softmax(logits, dim=1)).sum(dim=1).mean()
+            optimizer.zero_grad(set_to_none=True)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+            optimizer.step()
+        if not checkpointing:
+            continue
+        metrics = evaluate_official(
+            valid_users, valid_labels, predict_split("valid"),
+            starter_kit_dir=prepared.data.starter_kit_dir,
+        )
+        if metrics["primary"] > best_primary + 1e-5:
+            best_primary = metrics["primary"]
+            bad_epochs = 0
+            best_state = {
+                key: value.detach().cpu().clone() for key, value in model.state_dict().items()
+            }
+        else:
+            bad_epochs += 1
+            if bad_epochs >= patience:
+                break
+    if best_state is not None:
+        model.load_state_dict(best_state)
+
+    scores = {split: predict_split(split) for split in ("train", "valid", "test")}
+    return PredictionBundle("setwise_rank", scores, prepared.data)

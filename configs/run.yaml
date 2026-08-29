@@ -10,6 +10,7 @@ loop:
   confirm_small_deltas: true
   validation_reproposal_attempts: 3
   repair_attempts: 3
+  inner_refinement_attempts: 4
 evaluation:
   mode: production
   data_dir: data/kuairand-pure/data

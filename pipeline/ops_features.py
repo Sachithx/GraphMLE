@@ -364,6 +364,65 @@ def op_user_category_affinity(
     )
 
 
+USER_ATTRIBUTE_CHOICES = ("duration_bucket", "tab", "tag", "author_id")
+
+
+def _attribute_column(
+    frame: pd.DataFrame, attribute: str, edges: np.ndarray | None
+) -> pd.Series:
+    if attribute == "duration_bucket":
+        assert edges is not None
+        return pd.Series(
+            np.searchsorted(edges, frame["duration_ms"].to_numpy(dtype=float)),
+            index=frame.index,
+        ).astype(str)
+    return frame[attribute].astype(str)
+
+
+def op_user_attribute_affinity(
+    inputs: list[Any], params: dict[str, Any], ctx: ExecutionContext
+) -> FeatureBundle:
+    """Historical long-view rate for this user against this video's attribute.
+
+    The scored metric ranks within a user, so a feature that is constant across a
+    user's rows cannot change their ordering. This operator deliberately builds
+    user-by-attribute statistics, which vary within a user because the video
+    attribute varies, and are therefore able to move the ranking.
+    """
+    del ctx
+    data = _require_data(inputs)
+    attribute = str(params.get("attribute", "duration_bucket"))
+    if attribute not in USER_ATTRIBUTE_CHOICES:
+        raise ValueError(
+            f"unsupported attribute {attribute!r}; choose from {list(USER_ATTRIBUTE_CHOICES)}"
+        )
+    edges: np.ndarray | None = None
+    if attribute == "duration_bucket":
+        buckets = int(params.get("buckets", 10))
+        train_duration = data.frames["train"]["duration_ms"].to_numpy(dtype=float)
+        edges = np.quantile(train_duration, np.linspace(0, 1, buckets + 1)[1:-1])
+
+    prefix = f"user_{attribute}_affinity"
+
+    def builder(
+        train_df: pd.DataFrame, target_df: pd.DataFrame, build_ctx: FeatureBuildContext
+    ) -> pd.DataFrame:
+        history = train_df.copy()
+        target = target_df.copy()
+        history["_attribute"] = _attribute_column(history, attribute, edges)
+        target["_attribute"] = _attribute_column(target, attribute, edges)
+        return _expanding_rate(
+            history, target, build_ctx, ("user_id", "_attribute"), prefix
+        )
+
+    sources = frozenset({"date", "user_id", "long_view"}) | (
+        frozenset({"duration_ms"}) if attribute == "duration_bucket" else frozenset({attribute})
+    )
+    return _historical_feature_bundle(
+        data, prefix, params, builder, sources
+    )
+
+
 def op_user_history(
     inputs: list[Any], params: dict[str, Any], ctx: ExecutionContext
 ) -> FeatureBundle:
@@ -441,6 +500,121 @@ def op_temporal(
         "temporal",
         frames,
         ("cat_temporal_weekday", "cat_temporal_hour"),
+        data,
+        provenance,
+    )
+
+
+STATIC_USER_CATEGORICAL = (
+    "user_active_degree",
+    "follow_user_num_range",
+    "fans_user_num_range",
+    "friend_user_num_range",
+    "register_days_range",
+    *(f"onehot_feat{index}" for index in range(18)),
+)
+STATIC_USER_NUMERIC = (
+    "is_live_streamer",
+    "is_video_author",
+    "follow_user_num",
+    "fans_user_num",
+    "friend_user_num",
+    "register_days",
+)
+STATIC_VIDEO_CATEGORICAL = ("video_type", "upload_type", "music_type", "upload_dt")
+STATIC_VIDEO_NUMERIC = ("server_width", "server_height", "video_duration")
+# Columns held out on purpose: constant within KuaiRand-Pure (is_lowactive_period,
+# visible_status), already supplied by features.raw_categorical (author_id, tag), or
+# effectively a row identifier that would memorize rather than generalize (music_id).
+
+
+def op_static_side_features(
+    inputs: list[Any], params: dict[str, Any], ctx: ExecutionContext
+) -> FeatureBundle:
+    """Join the static user profile and video metadata side files.
+
+    Both files describe entities rather than interactions, so every column is
+    STATIC and carries SIDE_FILE lineage. Nothing here depends on the split
+    date, which is what makes the join safe for valid and test rows alike.
+    """
+    del ctx
+    data = _require_data(inputs)
+    log_numeric = frozenset(
+        {"follow_user_num", "fans_user_num", "friend_user_num", "register_days"}
+    )
+
+    users = pd.read_csv(
+        data.data_dir / "user_features_pure.csv",
+        usecols=["user_id", *STATIC_USER_CATEGORICAL, *STATIC_USER_NUMERIC],
+    )
+    users["user_id"] = users["user_id"].astype(str)
+    videos = pd.read_csv(
+        data.data_dir / "video_features_basic_pure.csv",
+        usecols=["video_id", *STATIC_VIDEO_CATEGORICAL, *STATIC_VIDEO_NUMERIC],
+    )
+    videos["video_id"] = videos["video_id"].astype(str)
+
+    user_lookup = users.set_index("user_id")
+    video_lookup = videos.set_index("video_id")
+    categorical_columns: list[str] = []
+    frames: dict[str, pd.DataFrame] = {}
+
+    for split, source in data.frames.items():
+        frame = pd.DataFrame({"row_id": source["row_id"].to_numpy()})
+        key_users = source["user_id"].astype(str)
+        key_videos = source["video_id"].astype(str)
+        for column in STATIC_USER_CATEGORICAL:
+            name = f"cat_su_{column}"
+            frame[name] = (
+                key_users.map(user_lookup[column]).astype("string").fillna("UNK").to_numpy()
+            )
+        for column in STATIC_USER_NUMERIC:
+            name = f"su_{column}"
+            values = pd.to_numeric(key_users.map(user_lookup[column]), errors="coerce")
+            if column in log_numeric:
+                # Follower/fan counts are heavy-tailed; compress before the models see them.
+                values = np.log1p(values.clip(lower=0))
+                name = f"su_log_{column}"
+            frame[name] = values.astype(np.float32).to_numpy()
+        for column in STATIC_VIDEO_CATEGORICAL:
+            name = f"cat_sv_{column}"
+            frame[name] = (
+                key_videos.map(video_lookup[column]).astype("string").fillna("UNK").to_numpy()
+            )
+        for column in STATIC_VIDEO_NUMERIC:
+            values = pd.to_numeric(key_videos.map(video_lookup[column]), errors="coerce")
+            if column == "video_duration":
+                frame["sv_log_video_duration"] = np.log1p(
+                    values.clip(lower=0)
+                ).astype(np.float32).to_numpy()
+            else:
+                frame[f"sv_{column}"] = values.astype(np.float32).to_numpy()
+        width = pd.to_numeric(key_videos.map(video_lookup["server_width"]), errors="coerce")
+        height = pd.to_numeric(key_videos.map(video_lookup["server_height"]), errors="coerce")
+        frame["sv_aspect_ratio"] = (
+            (height / width.replace(0, np.nan)).astype(np.float32).to_numpy()
+        )
+        frames[split] = frame
+        if not categorical_columns:
+            categorical_columns = [
+                name for name in frame.columns if name.startswith("cat_")
+            ]
+
+    lineage_user = FeatureLineage(
+        frozenset({"user_features_pure"}), TemporalScope.STATIC, SourceLog.SIDE_FILE
+    )
+    lineage_video = FeatureLineage(
+        frozenset({"video_features_basic_pure"}), TemporalScope.STATIC, SourceLog.SIDE_FILE
+    )
+    provenance = {
+        column: (lineage_user if "su_" in column else lineage_video)
+        for column in frames["train"].columns
+        if column != "row_id"
+    }
+    return FeatureBundle(
+        "static_side_features",
+        frames,
+        tuple(categorical_columns),
         data,
         provenance,
     )

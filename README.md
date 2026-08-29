@@ -154,13 +154,19 @@ The harness and the scored run are separate. The production entry point is:
 python -m agent.run --config configs/run.yaml --run-id final_01
 ```
 
-It initializes the FM-equivalent seed graph, caches node-level ablations by
-topology, requests one schema-constrained hypothesis, validates and executes the
-candidate in the Phase 3 sandbox, makes at most three bounded repair attempts,
-applies the 2σ/three-seed significance rule, accepts or reverts, and then checks
-the iteration, wall-clock, and three-small-delta convergence limits. The
-proposer receives only the graph, ablation evidence, ten recent outcomes, and
-rejected hypothesis IDs—never raw competition data.
+It initializes the seed graph, caches node-level ablations by topology, and uses
+the highest-impact ablated component as an outer-loop target. The default live
+config explores four schema-constrained variants of that component before
+moving to another target; convergence advances only once per completed outer
+group. Each candidate is validated and executed in the Phase 3 sandbox, receives
+at most three bounded repair attempts, and is accepted or reverted under the
+2σ/three-seed significance rule. The proposer receives only the graph, ablation
+evidence, ten recent outcomes, and rejected hypothesis IDs—never raw competition
+data.
+
+Graph validation also requires every node output to reach the single terminal
+submission, preventing successful-looking runs with discarded feature or model
+branches.
 
 Live proposals use OpenAI Responses structured outputs with the strict Pydantic
 `Hypothesis` schema. `configs/run.yaml` uses `gpt-5.6-terra` at low reasoning for
