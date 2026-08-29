@@ -253,7 +253,9 @@ class ProductionEvaluator:
         input_graph = output_dir / "candidate_graph.json"
         input_graph.write_text(json.dumps(graph.to_dict(), indent=2))
         command = [
-            str(Path(sys.executable).resolve()),
+            # Keep the virtualenv path intact. Resolving this symlink selects the
+            # base interpreter and drops the environment's site-packages.
+            str(Path(sys.executable)),
             "-m",
             "pipeline.execute",
             str(input_graph),

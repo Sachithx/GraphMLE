@@ -78,3 +78,22 @@ def test_live_hypothesis_schema_contains_no_open_ended_object_maps() -> None:
         }
     ).to_runtime()
     assert runtime.patch.params == {"seed": 29}
+
+
+def test_live_hypothesis_schema_uses_supported_union_keyword() -> None:
+    from openai.lib._pydantic import to_strict_json_schema
+
+    schema = to_strict_json_schema(LLMHypothesis)
+
+    def collect_keywords(value):
+        if isinstance(value, dict):
+            yield from value.keys()
+            for child in value.values():
+                yield from collect_keywords(child)
+        elif isinstance(value, list):
+            for child in value:
+                yield from collect_keywords(child)
+
+    keywords = list(collect_keywords(schema))
+    assert "oneOf" not in keywords
+    assert "anyOf" in keywords

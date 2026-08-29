@@ -141,15 +141,12 @@ class LLMRegisterFeaturePatch(StrictModel):
     temporal_scope: Literal["strictly_earlier", "same_row", "static"]
 
 
-LLMPatch = Annotated[
-    Union[
-        LLMReplaceParamsPatch,
-        LLMAddNodePatch,
-        LLMRemoveNodePatch,
-        LLMRewirePatch,
-        LLMRegisterFeaturePatch,
-    ],
-    Field(discriminator="op"),
+LLMPatch = Union[
+    LLMReplaceParamsPatch,
+    LLMAddNodePatch,
+    LLMRemoveNodePatch,
+    LLMRewirePatch,
+    LLMRegisterFeaturePatch,
 ]
 
 
