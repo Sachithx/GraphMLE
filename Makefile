@@ -1,4 +1,4 @@
-.PHONY: test phase1-gate phase2-gate phase3-gate
+.PHONY: test phase1-gate phase2-gate phase3-gate phase4-gate
 
 PYTHON := .venv/bin/python
 
@@ -13,3 +13,6 @@ phase2-gate:
 
 phase3-gate:
 	$(PYTHON) -m eval.phase3_gate
+
+phase4-gate:
+	$(PYTHON) -m eval.phase4_gate

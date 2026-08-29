@@ -1,0 +1,70 @@
+seed_graph: configs/pipeline_seed.json
+loop:
+  max_iterations: 5
+  max_wall_clock_s: 120
+  iteration_timeout_s: 10
+  memory_limit_mb: 512
+  convergence_window: 3
+  convergence_delta: 0.002
+  significance_threshold: 0.0016
+  confirm_small_deltas: true
+  repair_attempts: 3
+evaluation:
+  mode: synthetic
+  baseline_primary: 0.6016
+llm:
+  mode: canned
+  model: gpt-5.4
+  max_retries: 3
+  hypotheses:
+    - id: h_001_induced_recovery
+      target_node: model
+      rationale: Exercise the bounded recovery path before accepting a large objective change.
+      method_source: induced Phase 4 acceptance failure
+      expected_delta: 0.012
+      expected_cost_minutes: 1
+      patch:
+        op: replace_params
+        node: model
+        params: {seed: 1, induce_failure: true}
+    - id: h_002_listwise
+      target_node: model
+      rationale: Match training to within-user ranking.
+      method_source: listwise ranking, LambdaRank
+      expected_delta: 0.009
+      expected_cost_minutes: 8
+      patch:
+        op: replace_params
+        node: model
+        params: {seed: 2}
+    - id: h_003_multitask
+      target_node: model
+      rationale: Share representation learning with legitimate auxiliary targets.
+      method_source: multi-task learning
+      expected_delta: 0.003
+      expected_cost_minutes: 12
+      patch:
+        op: replace_params
+        node: model
+        params: {seed: 3}
+    - id: h_004_tuning
+      target_node: model
+      rationale: Tune only after testing larger-effect directions.
+      method_source: bounded hyperparameter refinement
+      expected_delta: 0.001
+      expected_cost_minutes: 3
+      patch:
+        op: replace_params
+        node: model
+        params: {seed: 4}
+    - id: h_005_tuning
+      target_node: model
+      rationale: Test a final low-effect refinement.
+      method_source: bounded hyperparameter refinement
+      expected_delta: 0.0005
+      expected_cost_minutes: 3
+      patch:
+        op: replace_params
+        node: model
+        params: {seed: 5}
+

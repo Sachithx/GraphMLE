@@ -402,16 +402,25 @@ class AgentRunner:
             ablation_table = ablator.run(
                 incumbent_graph,
                 incumbent_metrics["primary"],
-                evaluator.ablate,
+                lambda graph, node_id: evaluator.ablate(
+                    graph, node_id, incumbent_metrics["primary"]
+                ),
             )
+            target_arms = sorted(
+                ablation_table,
+                key=lambda node: -float(ablation_table[node].get("removal_cost", 0.0)),
+            )
+            preferred_target = scheduler.select_arm(target_arms, arm_observations)
             proposal: ProposalResult = proposer.propose(
                 graph=incumbent_graph,
                 ablation_table=ablation_table,
                 recent_outcomes=memory.last_outcomes(10),
                 rejected_hypotheses=memory.rejected_hypothesis_ids(),
+                preferred_target=preferred_target,
             )
             hypothesis = proposal.hypothesis
             proposal_usage = proposal.usage
+            iteration_tokens = proposal_usage
 
             try:
                 mutation = apply_hypothesis(
@@ -444,9 +453,10 @@ class AgentRunner:
                     ).recover(candidate_graph, exc, evaluate_candidate)
                     errors = outcome.errors
                     recovery_events = outcome.events
-                    cumulative_tokens = cumulative_tokens + getattr(
+                    repair_usage = getattr(
                         repair_provider, "usage", TokenUsage()
                     )
+                    iteration_tokens = iteration_tokens + repair_usage
                     if not outcome.recovered or outcome.metrics is None:
                         raise RuntimeError("repair attempts exhausted")
                     candidate_graph = outcome.graph
@@ -487,7 +497,7 @@ class AgentRunner:
                     "improving_seeds": None,
                 }
 
-            cumulative_tokens = cumulative_tokens + proposal_usage
+            cumulative_tokens = cumulative_tokens + iteration_tokens
             diff = graph_diff(incumbent_graph, candidate_graph)
             candidate_graph_path = iteration_dir / "graph.json"
             candidate_graph_path.write_text(json.dumps(candidate_graph.to_dict(), indent=2))
@@ -508,7 +518,7 @@ class AgentRunner:
                 "errors": errors,
                 "recovery_events": recovery_events,
                 "wall_clock_s": iteration_wall,
-                "tokens": proposal_usage.to_log(),
+                "tokens": iteration_tokens.to_log(),
                 "cumulative": {
                     "wall_clock_s": time.monotonic() - run_start,
                     "tokens_in": cumulative_tokens.input_tokens,
@@ -591,4 +601,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

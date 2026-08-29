@@ -117,12 +117,14 @@ class LiveHypothesisProposer:
         ablation_table: dict[str, dict[str, float | str]],
         recent_outcomes: list[dict[str, Any]],
         rejected_hypotheses: list[str],
+        preferred_target: str | None = None,
     ) -> ProposalResult:
         context = {
             "incumbent_graph": graph.to_dict(),
             "ablation_table": ablation_table,
             "last_10_outcomes": recent_outcomes[-10:],
             "already_tried_and_rejected": rejected_hypotheses,
+            "scheduler_preferred_target": preferred_target,
         }
         result = self.client.parse(
             Hypothesis,
@@ -146,8 +148,9 @@ class CannedHypothesisProposer:
         ablation_table: dict[str, dict[str, float | str]],
         recent_outcomes: list[dict[str, Any]],
         rejected_hypotheses: list[str],
+        preferred_target: str | None = None,
     ) -> ProposalResult:
-        del graph, ablation_table, recent_outcomes, rejected_hypotheses
+        del graph, ablation_table, recent_outcomes, rejected_hypotheses, preferred_target
         if self.index >= len(self.hypotheses):
             raise RuntimeError("canned hypothesis list exhausted")
         hypothesis = self.hypotheses[self.index]
