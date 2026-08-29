@@ -33,6 +33,19 @@ def _require_features(inputs: list[Any]) -> list[FeatureBundle]:
     return bundles
 
 
+def op_ablation_constant_model(
+    inputs: list[Any], params: dict[str, Any], ctx: ExecutionContext
+) -> PredictionBundle:
+    del params, ctx
+    bundles = _require_features(inputs)
+    data = bundles[0].data
+    scores = {
+        split: np.zeros(len(frame), dtype=np.float64)
+        for split, frame in data.frames.items()
+    }
+    return PredictionBundle("ablation_constant", scores, data)
+
+
 def _merge_features(bundles: list[FeatureBundle]) -> tuple[dict[str, pd.DataFrame], tuple[str, ...]]:
     categorical: list[str] = []
     merged: dict[str, pd.DataFrame] = {}

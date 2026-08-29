@@ -61,6 +61,8 @@ def default_registry() -> OperatorRegistry:
     from .ops_ensemble import op_rank_average, op_seed_bag
     from .ops_features import (
         op_data_load,
+        op_ablation_constant_feature,
+        op_generated_feature,
         op_item_popularity,
         op_raw_categorical,
         op_temporal,
@@ -69,6 +71,7 @@ def default_registry() -> OperatorRegistry:
         op_video_duration,
     )
     from .ops_models import (
+        op_ablation_constant_model,
         op_fm_baseline,
         op_lightgbm_binary,
         op_lightgbm_rank,
@@ -85,11 +88,14 @@ def default_registry() -> OperatorRegistry:
         ("features.user_category_affinity", (ValueType.DATA,), ValueType.FEATURES, op_user_category_affinity, False),
         ("features.video_duration", (ValueType.DATA,), ValueType.FEATURES, op_video_duration, False),
         ("features.temporal", (ValueType.DATA,), ValueType.FEATURES, op_temporal, False),
+        ("features.generated", (ValueType.DATA,), ValueType.FEATURES, op_generated_feature, False),
+        ("features.ablation_constant", (ValueType.DATA,), ValueType.FEATURES, op_ablation_constant_feature, False),
         ("model.fm_baseline", (ValueType.FEATURES,), ValueType.PREDICTIONS, op_fm_baseline, True),
         ("model.lightgbm_binary", (ValueType.FEATURES,), ValueType.PREDICTIONS, op_lightgbm_binary, True),
         ("model.lightgbm_rank", (ValueType.FEATURES,), ValueType.PREDICTIONS, op_lightgbm_rank, True),
         ("model.torch_deepfm", (ValueType.FEATURES,), ValueType.PREDICTIONS, op_torch_deepfm, True),
         ("model.torch_multitask", (ValueType.FEATURES,), ValueType.PREDICTIONS, op_torch_multitask, True),
+        ("model.ablation_constant", (ValueType.FEATURES,), ValueType.PREDICTIONS, op_ablation_constant_model, True),
         ("ensemble.rank_average", (ValueType.PREDICTIONS,), ValueType.PREDICTIONS, op_rank_average, True),
         ("ensemble.seed_bag", (ValueType.PREDICTIONS,), ValueType.PREDICTIONS, op_seed_bag, True),
         ("submit.rank", (ValueType.PREDICTIONS,), ValueType.SUBMISSION, op_submit_rank, False),

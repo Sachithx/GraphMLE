@@ -14,6 +14,7 @@ from .types import (
     ExecutionContext,
     FeatureBundle,
     FeatureLineage,
+    SourceLog,
     TemporalScope,
 )
 
@@ -443,3 +444,65 @@ def op_temporal(
         data,
         provenance,
     )
+
+
+def op_generated_feature(
+    inputs: list[Any], params: dict[str, Any], ctx: ExecutionContext
+) -> FeatureBundle:
+    """Execute the one permitted free-form surface through the fixed build contract."""
+    del ctx
+    data = _require_data(inputs)
+    module_path = Path(str(params["module_path"])).resolve()
+    module = _load_module(module_path, f"techjam_generated_{module_path.stem}")
+    builder = getattr(module, "build", None)
+    if not callable(builder):
+        raise TypeError("generated feature module must expose callable build")
+    build_ctx = FeatureBuildContext(params=dict(params.get("builder_params", {})))
+    history = data.frames["train"]
+    frames = {
+        split: builder(history, target, build_ctx)
+        for split, target in data.frames.items()
+    }
+    for split, frame in frames.items():
+        if not isinstance(frame, pd.DataFrame):
+            raise TypeError("generated build must return a pandas DataFrame")
+        if "row_id" not in frame or len(frame) != len(data.frames[split]):
+            raise RuntimeError(f"generated feature violated row count on {split}")
+        if not frame["row_id"].reset_index(drop=True).equals(
+            data.frames[split]["row_id"].reset_index(drop=True)
+        ):
+            raise RuntimeError(f"generated feature violated row alignment on {split}")
+    scope = TemporalScope(str(params["temporal_scope"]))
+    source_log = SourceLog(str(params.get("source_log", "standard")))
+    max_source_date = params.get("max_source_date")
+    lineage = FeatureLineage(
+        frozenset(str(value) for value in params["sources"]),
+        scope,
+        source_log,
+        int(max_source_date) if max_source_date is not None else None,
+    )
+    provenance = {
+        column: lineage for column in frames["train"].columns if column != "row_id"
+    }
+    categorical = tuple(str(value) for value in params.get("categorical_columns", []))
+    return FeatureBundle(module_path.stem, frames, categorical, data, provenance)
+
+
+def op_ablation_constant_feature(
+    inputs: list[Any], params: dict[str, Any], ctx: ExecutionContext
+) -> FeatureBundle:
+    del params, ctx
+    data = _require_data(inputs)
+    frames = {
+        split: pd.DataFrame(
+            {
+                "row_id": source["row_id"].to_numpy(),
+                "ablation_constant": np.zeros(len(source), dtype=np.float32),
+            }
+        )
+        for split, source in data.frames.items()
+    }
+    provenance = {
+        "ablation_constant": FeatureLineage(frozenset(), TemporalScope.STATIC)
+    }
+    return FeatureBundle("ablation_constant", frames, (), data, provenance)
