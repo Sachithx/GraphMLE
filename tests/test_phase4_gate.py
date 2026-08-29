@@ -6,6 +6,18 @@ from pathlib import Path
 from eval.phase4_gate import run_gate
 
 
+def test_runner_allows_tee_to_create_console_log_before_initialization(tmp_path: Path) -> None:
+    from agent.run import AgentRunner, load_config
+
+    run_dir = tmp_path / "tee_race"
+    run_dir.mkdir()
+    (run_dir / "console.log").touch()
+    summary = AgentRunner(
+        load_config(Path("configs/phase4_gate.yaml")), run_dir=run_dir
+    ).run()
+    assert summary["iterations"] == 5
+
+
 def test_phase4_gate_runs_five_unattended_iterations_with_recovery(tmp_path: Path) -> None:
     result = run_gate(tmp_path / "phase4")
     assert result["status"] == "passed"
@@ -38,4 +50,3 @@ def test_phase4_gate_runs_five_unattended_iterations_with_recovery(tmp_path: Pat
     assert any(record["recovery_events"] for record in records)
     assert all(record["tokens"] == {"in": 0, "out": 0} for record in records)
     assert (Path(result["run_dir"]) / "best" / "graph.json").exists()
-

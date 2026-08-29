@@ -52,3 +52,24 @@ def test_memory_cap_terminates_oversized_process(tmp_path: Path) -> None:
     )
     assert result.status == "failed"
     assert result.returncode != 0
+
+
+def test_memory_cap_measures_rss_not_large_virtual_cuda_style_mapping(tmp_path: Path) -> None:
+    result = run_in_sandbox(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import mmap; "
+                "mapping = mmap.mmap(-1, 16 * 1024 * 1024 * 1024, "
+                "flags=mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS); "
+                "mapping[0] = 1; print('mapped')"
+            ),
+        ],
+        workdir=tmp_path,
+        stdout_path=tmp_path / "virtual_memory.log",
+        timeout_s=5,
+        memory_limit_mb=128,
+    )
+    assert result.status == "success"
+    assert "mapped" in result.stdout_path.read_text()
