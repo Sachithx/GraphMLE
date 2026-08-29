@@ -1,0 +1,10 @@
+{
+  "nodes": [
+    {"id": "load", "type": "data.load", "params": {}},
+    {"id": "raw", "type": "features.raw_categorical", "params": {}, "inputs": ["load"]},
+    {"id": "pop", "type": "features.item_popularity", "params": {"smoothing": 20}, "inputs": ["load"]},
+    {"id": "model", "type": "model.lightgbm_rank", "params": {"objective": "lambdarank", "n_estimators": 100, "num_leaves": 31, "lr": 0.05, "group_by": "user_id", "seed": 0}, "inputs": ["raw", "pop"]},
+    {"id": "out", "type": "submit.rank", "params": {"filename": "submission.csv"}, "inputs": ["model"]}
+  ],
+  "meta": {"name": "phase2_lgbm_rank", "hypothesis_id": "handwritten_lgbm_rank"}
+}

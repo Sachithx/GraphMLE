@@ -1,0 +1,9 @@
+{
+  "nodes": [
+    {"id": "load", "type": "data.load", "params": {}},
+    {"id": "raw", "type": "features.raw_categorical", "params": {}, "inputs": ["load"]},
+    {"id": "model", "type": "model.fm_baseline", "params": {"seed": 0}, "inputs": ["raw"]},
+    {"id": "out", "type": "submit.rank", "params": {"filename": "submission.csv"}, "inputs": ["model"]}
+  ],
+  "meta": {"name": "phase2_fm", "hypothesis_id": "handwritten_fm"}
+}

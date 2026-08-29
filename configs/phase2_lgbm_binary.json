@@ -1,0 +1,11 @@
+{
+  "nodes": [
+    {"id": "load", "type": "data.load", "params": {}},
+    {"id": "raw", "type": "features.raw_categorical", "params": {}, "inputs": ["load"]},
+    {"id": "duration", "type": "features.video_duration", "params": {"buckets": 10}, "inputs": ["load"]},
+    {"id": "temporal", "type": "features.temporal", "params": {}, "inputs": ["load"]},
+    {"id": "model", "type": "model.lightgbm_binary", "params": {"n_estimators": 100, "num_leaves": 31, "lr": 0.05, "seed": 0}, "inputs": ["raw", "duration", "temporal"]},
+    {"id": "out", "type": "submit.rank", "params": {"filename": "submission.csv"}, "inputs": ["model"]}
+  ],
+  "meta": {"name": "phase2_lgbm_binary", "hypothesis_id": "handwritten_lgbm_binary"}
+}
