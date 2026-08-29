@@ -127,12 +127,12 @@ def test_add_node_can_atomically_replace_a_model_without_changing_its_id() -> No
                 "op": "add_node",
                 "replace_node": "model",
                 "node": {
-                    "id": "model",
-                    "type": "model.lightgbm_rank",
-                    "params": {"objective": "lambdarank"},
-                    "inputs": ["raw"],
+                        "id": "model",
+                        "type": "model.lightgbm_rank",
+                        "params": {"objective": "lambdarank"},
+                        "inputs": ["raw", "duration", "temporal"],
+                    },
                 },
-            },
         }
     )
     mutation = apply_hypothesis(seed_graph(), hypothesis, default_registry())

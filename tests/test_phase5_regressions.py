@@ -56,7 +56,9 @@ def valid_hypothesis(hypothesis_id: str, expected_delta: float) -> dict:
     }
 
 
-def run_config(hypotheses: list[dict], reproposals: int) -> RunConfig:
+def run_config(
+    hypotheses: list[dict], reproposals: int, *, inner_refinement_attempts: int = 1
+) -> RunConfig:
     return RunConfig.model_validate(
         {
             "seed_graph": "configs/pipeline_seed.json",
@@ -71,6 +73,7 @@ def run_config(hypotheses: list[dict], reproposals: int) -> RunConfig:
                 "confirm_small_deltas": False,
                 "validation_reproposal_attempts": reproposals,
                 "repair_attempts": 1,
+                "inner_refinement_attempts": inner_refinement_attempts,
             },
             "evaluation": {"mode": "synthetic", "baseline_primary": 0.6016},
             "llm": {"mode": "canned", "hypotheses": hypotheses},
@@ -122,6 +125,35 @@ def test_three_consecutive_invalid_proposals_do_not_terminate_the_run(
     assert record["hypothesis"]["id"] == "valid_after_three"
     assert record["executed"] is True
     assert len(record["proposal_rejections"]) == 3
+
+
+def test_convergence_is_computed_once_per_inner_refinement_group(
+    tmp_path: Path,
+) -> None:
+    config = run_config(
+        [
+            valid_hypothesis("inner_1", -0.01),
+            valid_hypothesis("inner_2", -0.02),
+            valid_hypothesis("inner_3", -0.03),
+        ],
+        reproposals=0,
+        inner_refinement_attempts=3,
+    )
+    config.loop.max_iterations = 5
+    config.loop.convergence_window = 1
+    run_dir = tmp_path / "inner_refinement"
+
+    summary = AgentRunner(config, run_dir=run_dir).run()
+    records = [
+        json.loads(line)
+        for line in (run_dir / "run_log.jsonl").read_text().splitlines()
+    ]
+
+    assert summary["stop_reason"] == "converged"
+    assert summary["iterations"] == 3
+    assert summary["outer_iterations"] == 1
+    assert [record["outer_iteration"] for record in records] == [1, 1, 1]
+    assert [record["inner_attempt"] for record in records] == [1, 2, 3]
 
 
 def test_phase5_metric_firewall_scores_validation_only(

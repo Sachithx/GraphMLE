@@ -1,0 +1,24 @@
+seed_graph: configs/pipeline_seed_final03.json
+loop:
+  max_iterations: 10
+  max_wall_clock_s: 21600
+  iteration_timeout_s: 900
+  memory_limit_mb: 4096
+  convergence_window: 5
+  convergence_delta: 0.0005
+  significance_threshold: 0.0016
+  confirm_small_deltas: true
+  validation_reproposal_attempts: 3
+  repair_attempts: 3
+evaluation:
+  mode: production
+  data_dir: data/kuairand-pure/data
+  starter_kit_dir: data/starter-kit
+  baseline_primary: 0.6014687563529677
+llm:
+  mode: live
+  model: gpt-5.6-terra
+  repair_model: gpt-5.6-luna
+  reasoning_effort: low
+  repair_reasoning_effort: low
+  max_retries: 3

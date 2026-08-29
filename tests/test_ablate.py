@@ -30,17 +30,19 @@ def test_ablation_is_cached_until_topology_changes(tmp_path: Path) -> None:
             "method_source": "ablation",
             "expected_delta": 0.003,
             "expected_cost_minutes": 1,
-            "patch": {
-                "op": "add_node",
-                "node": {
+                "patch": {
+                    "op": "add_node",
+                    "node": {
                     "id": "history",
                     "type": "features.user_history",
                     "params": {"windows": [1, 7]},
-                    "inputs": ["load"],
+                        "inputs": ["load"],
+                    },
+                    "consumers": ["model"],
+                    "consumer_mode": "append",
                 },
-            },
-        }
-    )
+            }
+        )
     changed = apply_hypothesis(graph, add, default_registry()).graph
     ablator.run(changed, 0.602, score_without)
     assert len(calls) == len(graph.nodes) + len(changed.nodes)

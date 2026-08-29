@@ -136,40 +136,33 @@ def _load_kit_runtime(ctx: ExecutionContext) -> tuple[Any, Any]:
     return kit_data, baseline
 
 
-def _augment_fm_encoding(
+def _encode_fm_features(
     bundles: list[FeatureBundle],
-    encoded: dict[str, tuple[np.ndarray, np.ndarray, list[Any]]],
-    dimension: int,
     *,
     numeric_bins: int,
 ) -> tuple[dict[str, tuple[np.ndarray, np.ndarray, list[Any]]], int]:
-    """Append every non-canonical feature bundle as a sparse FM field.
+    """Encode every explicit feature input as a sparse FM field.
 
     The starter FM consumes integer ids for one-hot fields. Categorical columns
     therefore receive a train-fitted vocabulary, while continuous columns are
-    converted to train-fitted quantile tokens. The built-in raw categorical
-    bundle is already represented exactly by the starter kit's five fields and
-    is not duplicated.
+    converted to train-fitted quantile tokens. There is intentionally no hidden
+    fallback to canonical data: graph ablation and usage checks must describe
+    the fields that the model actually receives.
     """
 
     if numeric_bins < 2:
         raise ValueError("FM numeric_bins must be at least 2")
     frames, categorical_columns = _merge_features(bundles)
-    base_columns = {
-        column
-        for bundle in bundles
-        if bundle.name == "raw_categorical"
-        for column in bundle.frames["train"].columns
-        if column != "row_id"
-    }
     feature_columns = [
         column
         for column in frames["train"].columns
-        if column != "row_id" and column not in base_columns
+        if column != "row_id"
     ]
+    if not feature_columns:
+        raise ValueError("FM requires at least one feature column")
     categorical_set = set(categorical_columns)
-    additions: dict[str, list[np.ndarray]] = {split: [] for split in frames}
-    next_offset = int(dimension)
+    encoded_columns: dict[str, list[np.ndarray]] = {split: [] for split in frames}
+    next_offset = 0
 
     for column in feature_columns:
         if column in categorical_set:
@@ -180,9 +173,11 @@ def _augment_fm_encoding(
                 codes = pd.Categorical(
                     frame[column].astype("string").fillna("UNK"),
                     categories=categories,
-                ).codes
+                ).codes.astype(np.int64, copy=False)
                 codes = np.where(codes < 0, len(categories), codes)
-                additions[split].append((codes + next_offset).astype(np.int32))
+                encoded_columns[split].append(
+                    (codes + next_offset).astype(np.int32)
+                )
         else:
             train_values = (
                 pd.to_numeric(frames["train"][column], errors="coerce")
@@ -205,19 +200,20 @@ def _augment_fm_encoding(
                     .to_numpy(dtype=np.float64)
                 )
                 codes = np.searchsorted(edges, values, side="right")
-                additions[split].append((codes + next_offset).astype(np.int32))
+                encoded_columns[split].append(
+                    (codes + next_offset).astype(np.int32)
+                )
         next_offset += field_dimension
 
-    if not feature_columns:
-        return encoded, int(dimension)
-    augmented = {}
-    for split, (matrix, labels, users) in encoded.items():
-        augmented[split] = (
-            np.column_stack([matrix, *additions[split]]).astype(np.int32, copy=False),
-            labels,
-            users,
+    encoded = {}
+    data = bundles[0].data
+    for split, columns in encoded_columns.items():
+        encoded[split] = (
+            np.column_stack(columns).astype(np.int32, copy=False),
+            data.frames[split]["long_view"].to_numpy(dtype=np.float32),
+            data.frames[split]["user_id"].astype(str).tolist(),
         )
-    return augmented, next_offset
+    return encoded, next_offset
 
 
 def op_fm_baseline(
@@ -225,12 +221,9 @@ def op_fm_baseline(
 ) -> PredictionBundle:
     bundles = _require_features(inputs)
     data = bundles[0].data
-    kit_data, baseline = _load_kit_runtime(ctx)
-    encoded, dimension = kit_data.encode(data.official_splits)
-    encoded, dimension = _augment_fm_encoding(
+    _kit_data, baseline = _load_kit_runtime(ctx)
+    encoded, dimension = _encode_fm_features(
         bundles,
-        encoded,
-        dimension,
         numeric_bins=int(params.get("numeric_bins", 32)),
     )
     x_train, y_train, _ = encoded["train"]

@@ -52,6 +52,7 @@ class LoopConfig(ConfigModel):
     confirm_small_deltas: bool = True
     validation_reproposal_attempts: int = 3
     repair_attempts: int = 3
+    inner_refinement_attempts: int = Field(default=1, ge=1, le=5)
 
 
 class EvaluationConfig(ConfigModel):
@@ -416,17 +417,42 @@ class AgentRunner:
         arm_observations: list[ArmObservation] = []
         invalid_hypothesis_ids: list[str] = []
         completed = 0
+        outer_completed = 0
         executed_iterations = 0
         rejected_proposals = 0
         stop_reason: str | None = None
+        inner_attempt = 0
+        focus_target: str | None = None
+        outer_start_primary = incumbent_metrics["primary"]
+        ablation_table: dict[str, dict[str, float | str]] = {}
 
         while True:
             stop_reason = scheduler.should_stop(
-                completed, time.monotonic() - run_start, recent_deltas
+                outer_completed,
+                time.monotonic() - run_start,
+                recent_deltas if inner_attempt == 0 else (),
             )
             if stop_reason:
                 break
+            if inner_attempt == 0:
+                ablation_table = ablator.run(
+                    incumbent_graph,
+                    incumbent_metrics["primary"],
+                    lambda graph, node_id: evaluator.ablate(
+                        graph, node_id, incumbent_metrics["primary"]
+                    ),
+                )
+                target_arms = sorted(
+                    ablation_table,
+                    key=lambda node: -float(
+                        ablation_table[node].get("removal_cost", 0.0)
+                    ),
+                )
+                focus_target = scheduler.select_arm(target_arms, arm_observations)
+                outer_start_primary = incumbent_metrics["primary"]
             iteration = completed + 1
+            outer_iteration = outer_completed + 1
+            current_inner_attempt = inner_attempt + 1
             iteration_dir = self.run_dir / "iterations" / f"{iteration:03d}"
             iteration_dir.mkdir(parents=True, exist_ok=True)
             iteration_start = time.monotonic()
@@ -444,18 +470,7 @@ class AgentRunner:
             executed = False
             proposal_calls = 0
 
-            ablation_table = ablator.run(
-                incumbent_graph,
-                incumbent_metrics["primary"],
-                lambda graph, node_id: evaluator.ablate(
-                    graph, node_id, incumbent_metrics["primary"]
-                ),
-            )
-            target_arms = sorted(
-                ablation_table,
-                key=lambda node: -float(ablation_table[node].get("removal_cost", 0.0)),
-            )
-            preferred_target = scheduler.select_arm(target_arms, arm_observations)
+            preferred_target = focus_target
             def evaluate_candidate(repaired: OperatorGraph) -> dict[str, float]:
                 return evaluator.evaluate(
                     repaired,
@@ -617,6 +632,9 @@ class AgentRunner:
             iteration_wall = time.monotonic() - iteration_start
             record = {
                 "iteration": iteration,
+                "outer_iteration": outer_iteration,
+                "inner_attempt": current_inner_attempt,
+                "focus_target": focus_target,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "hypothesis": (
                     hypothesis.model_dump(mode="json") if hypothesis is not None else None
@@ -659,10 +677,25 @@ class AgentRunner:
                 incumbent_metrics = metrics
                 self._write_best(candidate_graph, iteration_dir)
             completed += 1
+            inner_attempt += 1
+            topology_changed = bool(
+                accepted and mutation is not None and mutation.topology_changed
+            )
+            if (
+                inner_attempt >= loop.inner_refinement_attempts
+                or topology_changed
+            ):
+                recent_deltas.append(
+                    incumbent_metrics["primary"] - outer_start_primary
+                )
+                outer_completed += 1
+                inner_attempt = 0
+                focus_target = None
 
         summary = {
             "status": "completed",
             "iterations": completed,
+            "outer_iterations": outer_completed,
             "executed_iterations": executed_iterations,
             "rejected_proposals": rejected_proposals,
             "stop_reason": stop_reason,

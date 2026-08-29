@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from pipeline.ops_features import AUXILIARY_TARGETS
-from pipeline.ops_models import _augment_fm_encoding, op_torch_deepfm, op_torch_multitask
+from pipeline.ops_models import _encode_fm_features, op_torch_deepfm, op_torch_multitask
 from pipeline.types import DataBundle, ExecutionContext, FeatureBundle
 
 
@@ -59,21 +59,10 @@ def test_torch_model_nodes_return_aligned_finite_scores(tmp_path: Path) -> None:
 
 def test_fm_encoding_consumes_categorical_and_numeric_feature_columns(tmp_path: Path) -> None:
     bundle, _ = synthetic_bundle(tmp_path)
-    encoded = {
-        split: (
-            np.zeros((len(frame), 1), dtype=np.int32),
-            np.zeros(len(frame), dtype=np.float32),
-            ["user"] * len(frame),
-        )
-        for split, frame in bundle.frames.items()
-    }
-
-    augmented, dimension = _augment_fm_encoding(
-        [bundle], encoded, 1, numeric_bins=4
-    )
+    encoded, dimension = _encode_fm_features([bundle], numeric_bins=4)
 
     assert dimension > 1
-    assert augmented["train"][0].shape == (32, 3)
-    assert np.unique(augmented["train"][0][:, 1]).size == 5
-    assert np.unique(augmented["train"][0][:, 2]).size == 4
-    assert not np.array_equal(augmented["train"][0], encoded["train"][0])
+    assert encoded["train"][0].shape == (32, 2)
+    assert np.unique(encoded["train"][0][:, 0]).size == 5
+    assert np.unique(encoded["train"][0][:, 1]).size == 4
+    assert encoded["valid"][0].shape == (8, 2)

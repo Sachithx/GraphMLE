@@ -227,6 +227,8 @@ unregistered node type invalid. Respect every input/output signature. For an exi
 operator, replace_params replaces its complete parameter map. Use add_node with
 replace_node to switch an existing operator type. Internal ablation operators are not
 candidate operators. Use register_feature, not add_node, for generated Python features.
+Every node output must reach the single terminal submission; attach new feature or
+model nodes to consumers atomically so the graph has no discarded computation.
 
 Problem framing:
 - GAUC and nDCG rank roughly five logged impressions within each user. Pointwise
@@ -240,9 +242,12 @@ Problem framing:
 - Randomized exposure supports IPS or doubly robust correction, but its overlap
   with the test window means derived features must remain restricted to training dates.
 - Every historical aggregate must use dates strictly earlier than its target row.
+- The FM consumes every explicit feature bundle. FM and LambdaRank make different
+  errors, so weighted rank-average changes are valid targeted ensemble hypotheses.
 
 Prioritize large expected effects such as listwise ranking and multi-task learning
-before hyperparameter tuning. Do not request raw data or executable shell access.
+before hyperparameter tuning. When scheduler_preferred_target is supplied, keep the
+hypothesis focused on that component. Do not request raw data or executable shell access.
 """
 
 
@@ -292,33 +297,40 @@ EXAMPLE_GRAPHS = [
                 "inputs": ["load"],
             },
             {
-                "id": "duration",
-                "type": "features.video_duration",
-                "params": {"buckets": 10},
+                "id": "pop",
+                "type": "features.item_popularity",
+                "params": {"smoothing": 20},
                 "inputs": ["load"],
             },
             {
-                "id": "temporal",
-                "type": "features.temporal",
-                "params": {},
-                "inputs": ["load"],
+                "id": "fm",
+                "type": "model.fm_baseline",
+                "params": {"seed": 0, "numeric_bins": 32},
+                "inputs": ["raw", "pop"],
             },
             {
-                "id": "model",
-                "type": "model.torch_multitask",
+                "id": "ranker",
+                "type": "model.lightgbm_rank",
                 "params": {
-                    "device": "auto",
-                    "epochs": 3,
-                    "auxiliary_targets": ["is_click", "is_like", "is_follow"],
+                    "objective": "lambdarank",
+                    "n_estimators": 100,
+                    "num_leaves": 31,
+                    "lr": 0.05,
                     "seed": 0,
                 },
-                "inputs": ["raw", "duration", "temporal"],
+                "inputs": ["raw", "pop"],
+            },
+            {
+                "id": "blend",
+                "type": "ensemble.rank_average",
+                "params": {"weights": [0.65, 0.35]},
+                "inputs": ["fm", "ranker"],
             },
             {
                 "id": "out",
                 "type": "submit.rank",
                 "params": {"filename": "submission.csv"},
-                "inputs": ["model"],
+                "inputs": ["blend"],
             },
         ]
     },
