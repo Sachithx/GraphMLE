@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Callable
+from dataclasses import dataclass, field
+from typing import Any, Callable, Mapping
 
 from .types import ExecutionContext, ValueType
 
@@ -16,6 +16,7 @@ class OperatorSpec:
     output_type: ValueType
     function: OperatorCallable
     variadic: bool = False
+    parameters: Mapping[str, str] = field(default_factory=dict)
 
     def input_error(self, actual: tuple[ValueType, ...]) -> str | None:
         if self.variadic:
@@ -54,6 +55,127 @@ class OperatorRegistry:
 
     def names(self) -> tuple[str, ...]:
         return tuple(self._specs)
+
+    def keys(self) -> tuple[str, ...]:
+        """Return the live operator names used to constrain LLM output schemas."""
+        return self.names()
+
+    def catalog(self) -> list[dict[str, Any]]:
+        """Return model-facing operator contracts from the live registry."""
+        return [
+            {
+                "type": spec.name,
+                "inputs": [value.value for value in spec.input_types],
+                "variadic": spec.variadic,
+                "output": spec.output_type.value,
+                "parameters": dict(spec.parameters),
+            }
+            for spec in self._specs.values()
+        ]
+
+
+OPERATOR_PARAMETERS: dict[str, dict[str, str]] = {
+    "data.load": {},
+    "features.raw_categorical": {},
+    "features.user_history": {
+        "windows": "list[int], default [1, 7], strictly-earlier history windows in days",
+    },
+    "features.item_popularity": {
+        "smoothing": "float, default 0, prior-count smoothing",
+    },
+    "features.user_category_affinity": {
+        "smoothing": "float, default 0, prior-count smoothing",
+    },
+    "features.video_duration": {
+        "buckets": "int, default 10, duration quantile buckets",
+    },
+    "features.temporal": {},
+    "features.generated": {
+        "module_path": "string, supplied by register_feature; do not invent",
+        "builder_params": "object encoded as parameter entries",
+        "sources": "list[str], supplied by register_feature",
+        "temporal_scope": "strictly_earlier | same_row | static",
+        "source_log": "standard | randomized | side_file, default standard",
+        "max_source_date": "int YYYYMMDD; required for randomized sources",
+        "categorical_columns": "list[str], default []",
+    },
+    "features.ablation_constant": {
+        "internal": "ablation-only operator; never propose for a candidate",
+    },
+    "model.fm_baseline": {
+        "seed": "int",
+        "lr": "float, default 0.001",
+        "epochs": "int, default 40",
+        "batch_size": "int, default 8192",
+        "patience": "int, default 4",
+        "k": "int, default 16",
+        "l2": "float, default 1e-6",
+    },
+    "model.lightgbm_binary": {
+        "seed": "int",
+        "n_estimators": "int, default 200",
+        "num_leaves": "int, default 31",
+        "lr": "float, default 0.05",
+        "min_child_samples": "int, default 20",
+        "subsample": "float, default 1",
+        "colsample_bytree": "float, default 1",
+        "reg_lambda": "float, default 0",
+        "n_jobs": "int, default 0",
+    },
+    "model.lightgbm_rank": {
+        "objective": "string, default lambdarank",
+        "seed": "int",
+        "n_estimators": "int, default 200",
+        "num_leaves": "int, default 31",
+        "lr": "float, default 0.05",
+        "min_child_samples": "int, default 20",
+        "subsample": "float, default 1",
+        "colsample_bytree": "float, default 1",
+        "reg_lambda": "float, default 0",
+        "n_jobs": "int, default 0",
+    },
+    "model.torch_deepfm": {
+        "seed": "int",
+        "device": "auto | cuda | cpu, default auto",
+        "threads": "int, default 4",
+        "embedding_dim": "int, default 16",
+        "hidden_dim": "int, default 64",
+        "dropout": "float, default 0.1",
+        "batch_size": "int, default 8192",
+        "epochs": "int, default 3",
+        "lr": "float, default 0.001",
+        "weight_decay": "float, default 1e-6",
+        "prediction_batch_size": "int, default 65536",
+    },
+    "model.torch_multitask": {
+        "seed": "int",
+        "device": "auto | cuda | cpu, default auto",
+        "threads": "int, default 4",
+        "embedding_dim": "int, default 16",
+        "hidden_dim": "int, default 64",
+        "dropout": "float, default 0.1",
+        "batch_size": "int, default 8192",
+        "epochs": "int, default 3",
+        "lr": "float, default 0.001",
+        "weight_decay": "float, default 1e-6",
+        "prediction_batch_size": "int, default 65536",
+        "auxiliary_targets": "list[str] of allowed same-row auxiliary labels",
+    },
+    "model.ablation_constant": {
+        "internal": "ablation-only operator; never propose for a candidate",
+    },
+    "ensemble.rank_average": {
+        "weights": "list[float], default equal weights; length must match inputs",
+    },
+    "ensemble.seed_bag": {
+        "weights": "list[float], default equal weights; length must match inputs",
+    },
+    "submit.rank": {
+        "filename": "basename string, default submission.csv",
+        "split": "valid | test, default test",
+        "check_timeout_s": "int, default 300",
+    },
+}
 
 
 def default_registry() -> OperatorRegistry:
@@ -100,5 +222,14 @@ def default_registry() -> OperatorRegistry:
         ("ensemble.seed_bag", (ValueType.PREDICTIONS,), ValueType.PREDICTIONS, op_seed_bag, True),
         ("submit.rank", (ValueType.PREDICTIONS,), ValueType.SUBMISSION, op_submit_rank, False),
     ):
-        registry.register(OperatorSpec(name, inputs, output, function, variadic))
+        registry.register(
+            OperatorSpec(
+                name,
+                inputs,
+                output,
+                function,
+                variadic,
+                OPERATOR_PARAMETERS[name],
+            )
+        )
     return registry

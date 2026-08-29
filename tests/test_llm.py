@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+from pydantic import ValidationError
+
 from agent.llm import OpenAIStructuredClient
-from agent.propose import LLMHypothesis
+from agent.propose import LLMHypothesis, llm_hypothesis_schema
+from pipeline.registry import default_registry
 
 
 def test_responses_structured_output_and_usage_are_accounted() -> None:
@@ -97,3 +101,44 @@ def test_live_hypothesis_schema_uses_supported_union_keyword() -> None:
     keywords = list(collect_keywords(schema))
     assert "oneOf" not in keywords
     assert "anyOf" in keywords
+
+
+def test_live_registry_types_are_an_enum_and_unknown_types_are_unrepresentable() -> None:
+    registry = default_registry()
+    schema_type = llm_hypothesis_schema(registry)
+    schema = schema_type.model_json_schema()
+
+    def enums(value):
+        if isinstance(value, dict):
+            if "enum" in value:
+                yield value["enum"]
+            for child in value.values():
+                yield from enums(child)
+        elif isinstance(value, list):
+            for child in value:
+                yield from enums(child)
+
+    assert list(registry.keys()) in list(enums(schema))
+    with pytest.raises(ValidationError, match="model.not_registered"):
+        schema_type.model_validate(
+            {
+                "id": "h_unknown",
+                "target_node": "model",
+                "rationale": "must fail in the API schema",
+                "method_source": "unit test",
+                "expected_delta": 0.01,
+                "expected_cost_minutes": 1,
+                "patch": {
+                    "op": "add_node",
+                    "node": {
+                        "id": "model",
+                        "type": "model.not_registered",
+                        "params": [],
+                        "inputs": ["raw"],
+                    },
+                    "replace_node": "model",
+                    "consumers": [],
+                    "consumer_mode": "append",
+                },
+            }
+        )

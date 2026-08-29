@@ -8,6 +8,7 @@ loop:
   convergence_delta: 0.002
   significance_threshold: 0.0016
   confirm_small_deltas: true
+  validation_reproposal_attempts: 3
   repair_attempts: 3
 evaluation:
   mode: production

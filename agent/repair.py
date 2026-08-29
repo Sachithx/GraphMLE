@@ -2,13 +2,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from pipeline.graph import OperatorGraph
 from pipeline.registry import OperatorRegistry
 
 from .llm import StructuredClient, TokenUsage
-from .propose import Hypothesis, LLMHypothesis, apply_hypothesis
+from .propose import (
+    EXAMPLE_GRAPHS,
+    Hypothesis,
+    apply_hypothesis,
+    llm_hypothesis_schema,
+)
 
 
 Metrics = dict[str, float]
@@ -42,10 +48,13 @@ class LLMRepairProvider:
         client: StructuredClient,
         registry: OperatorRegistry,
         failing_hypothesis: Hypothesis,
+        generated_feature_dir: Path | None = None,
     ) -> None:
         self.client = client
         self.registry = registry
         self.failing_hypothesis = failing_hypothesis
+        self.generated_feature_dir = generated_feature_dir
+        self.schema = llm_hypothesis_schema(registry)
         self.usage = TokenUsage()
 
     def repair(self, graph: OperatorGraph, error: str, attempt: int) -> OperatorGraph:
@@ -54,19 +63,25 @@ class LLMRepairProvider:
             "traceback_or_error": error,
             "failing_patch": self.failing_hypothesis.patch.model_dump(),
             "failing_graph": graph.to_dict(),
+            "operator_catalog": self.registry.catalog(),
+            "valid_graph_examples": EXAMPLE_GRAPHS,
         }
         result = self.client.parse(
-            LLMHypothesis,
+            self.schema,
             instructions=(
                 "Repair the failing bounded graph patch. Return one of the five allowed "
                 "patch operations, make the smallest change that addresses the traceback, "
-                "and do not add unrelated experiments."
+                "and do not add unrelated experiments. Use only types and parameters in "
+                "operator_catalog and respect all input/output signatures."
             ),
             input_text=json.dumps(payload, sort_keys=True),
         )
         self.usage = self.usage + result.usage
         return apply_hypothesis(
-            graph, result.value.to_runtime(), self.registry
+            graph,
+            result.value.to_runtime(),
+            self.registry,
+            generated_feature_dir=self.generated_feature_dir,
         ).graph
 
 

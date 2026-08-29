@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, PositiveFloat
+from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, create_model
 
 from guards.leakage import FORBIDDEN_SAME_ROW
 from pipeline.graph import GraphValidationError, OperatorGraph
@@ -173,6 +173,42 @@ class LLMHypothesis(StrictModel):
         return Hypothesis.model_validate(raw)
 
 
+def llm_hypothesis_schema(registry: OperatorRegistry) -> type[LLMHypothesis]:
+    """Build the API schema from the live registry so unknown types are impossible."""
+    operator_type = Literal.__getitem__(registry.keys())
+    registry_node = create_model(
+        "RegistryNodeDefinition",
+        __base__=LLMNodeDefinition,
+        __module__=__name__,
+        type=(operator_type, ...),
+    )
+    registry_add = create_model(
+        "RegistryAddNodePatch",
+        __base__=LLMAddNodePatch,
+        __module__=__name__,
+        node=(registry_node, ...),
+    )
+    registry_feature = create_model(
+        "RegistryRegisterFeaturePatch",
+        __base__=LLMRegisterFeaturePatch,
+        __module__=__name__,
+        node=(registry_node, ...),
+    )
+    registry_patch = Union[
+        LLMReplaceParamsPatch,
+        registry_add,
+        LLMRemoveNodePatch,
+        LLMRewirePatch,
+        registry_feature,
+    ]
+    return create_model(
+        "RegistryLLMHypothesis",
+        __base__=LLMHypothesis,
+        __module__=__name__,
+        patch=(registry_patch, ...),
+    )
+
+
 def _parameter_entries_to_dict(entries: list[dict[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for entry in entries:
@@ -185,6 +221,12 @@ def _parameter_entries_to_dict(entries: list[dict[str, Any]]) -> dict[str, Any]:
 
 SYSTEM_PROMPT = """You are the hypothesis proposer inside an autonomous ML research harness.
 Return exactly one bounded graph mutation using the supplied schema.
+
+Use only operator types and parameters in operator_catalog. The schema makes any
+unregistered node type invalid. Respect every input/output signature. For an existing
+operator, replace_params replaces its complete parameter map. Use add_node with
+replace_node to switch an existing operator type. Internal ablation operators are not
+candidate operators. Use register_feature, not add_node, for generated Python features.
 
 Problem framing:
 - GAUC and nDCG rank roughly five logged impressions within each user. Pointwise
@@ -204,6 +246,85 @@ before hyperparameter tuning. Do not request raw data or executable shell access
 """
 
 
+EXAMPLE_GRAPHS = [
+    {
+        "nodes": [
+            {"id": "load", "type": "data.load", "params": {}, "inputs": []},
+            {
+                "id": "raw",
+                "type": "features.raw_categorical",
+                "params": {},
+                "inputs": ["load"],
+            },
+            {
+                "id": "pop",
+                "type": "features.item_popularity",
+                "params": {"smoothing": 20},
+                "inputs": ["load"],
+            },
+            {
+                "id": "model",
+                "type": "model.lightgbm_rank",
+                "params": {
+                    "objective": "lambdarank",
+                    "n_estimators": 200,
+                    "num_leaves": 31,
+                    "lr": 0.05,
+                    "seed": 0,
+                },
+                "inputs": ["raw", "pop"],
+            },
+            {
+                "id": "out",
+                "type": "submit.rank",
+                "params": {"filename": "submission.csv"},
+                "inputs": ["model"],
+            },
+        ]
+    },
+    {
+        "nodes": [
+            {"id": "load", "type": "data.load", "params": {}, "inputs": []},
+            {
+                "id": "raw",
+                "type": "features.raw_categorical",
+                "params": {},
+                "inputs": ["load"],
+            },
+            {
+                "id": "duration",
+                "type": "features.video_duration",
+                "params": {"buckets": 10},
+                "inputs": ["load"],
+            },
+            {
+                "id": "temporal",
+                "type": "features.temporal",
+                "params": {},
+                "inputs": ["load"],
+            },
+            {
+                "id": "model",
+                "type": "model.torch_multitask",
+                "params": {
+                    "device": "auto",
+                    "epochs": 3,
+                    "auxiliary_targets": ["is_click", "is_like", "is_follow"],
+                    "seed": 0,
+                },
+                "inputs": ["raw", "duration", "temporal"],
+            },
+            {
+                "id": "out",
+                "type": "submit.rank",
+                "params": {"filename": "submission.csv"},
+                "inputs": ["model"],
+            },
+        ]
+    },
+]
+
+
 @dataclass(frozen=True)
 class ProposalResult:
     hypothesis: Hypothesis
@@ -211,8 +332,10 @@ class ProposalResult:
 
 
 class LiveHypothesisProposer:
-    def __init__(self, client: StructuredClient) -> None:
+    def __init__(self, client: StructuredClient, registry: OperatorRegistry) -> None:
         self.client = client
+        self.registry = registry
+        self.schema = llm_hypothesis_schema(registry)
 
     def propose(
         self,
@@ -222,16 +345,20 @@ class LiveHypothesisProposer:
         recent_outcomes: list[dict[str, Any]],
         rejected_hypotheses: list[str],
         preferred_target: str | None = None,
+        proposal_feedback: list[str] | None = None,
     ) -> ProposalResult:
         context = {
             "incumbent_graph": graph.to_dict(),
+            "operator_catalog": self.registry.catalog(),
+            "valid_graph_examples": EXAMPLE_GRAPHS,
             "ablation_table": ablation_table,
             "last_10_outcomes": recent_outcomes[-10:],
             "already_tried_and_rejected": rejected_hypotheses,
             "scheduler_preferred_target": preferred_target,
+            "validation_feedback_for_reproposal": proposal_feedback or [],
         }
         result = self.client.parse(
-            LLMHypothesis,
+            self.schema,
             instructions=SYSTEM_PROMPT,
             input_text=json.dumps(context, sort_keys=True),
         )
@@ -253,8 +380,16 @@ class CannedHypothesisProposer:
         recent_outcomes: list[dict[str, Any]],
         rejected_hypotheses: list[str],
         preferred_target: str | None = None,
+        proposal_feedback: list[str] | None = None,
     ) -> ProposalResult:
-        del graph, ablation_table, recent_outcomes, rejected_hypotheses, preferred_target
+        del (
+            graph,
+            ablation_table,
+            recent_outcomes,
+            rejected_hypotheses,
+            preferred_target,
+            proposal_feedback,
+        )
         if self.index >= len(self.hypotheses):
             raise RuntimeError("canned hypothesis list exhausted")
         hypothesis = self.hypotheses[self.index]

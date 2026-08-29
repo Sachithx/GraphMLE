@@ -77,6 +77,7 @@ class ExecutionContext:
     cache: dict[str, Any] = field(default_factory=dict)
     run_log_path: Path | None = None
     leakage_guard_enabled: bool = True
+    metric_splits: tuple[str, ...] = ("valid", "test")
 
     def __post_init__(self) -> None:
         self.data_dir = self.data_dir.expanduser().resolve()
@@ -84,3 +85,8 @@ class ExecutionContext:
         self.output_dir = self.output_dir.expanduser().resolve()
         if self.run_log_path is not None:
             self.run_log_path = self.run_log_path.expanduser().resolve()
+        invalid_metric_splits = sorted(set(self.metric_splits) - {"valid", "test"})
+        if invalid_metric_splits:
+            raise ValueError(f"invalid metric splits: {invalid_metric_splits}")
+        if not self.metric_splits:
+            raise ValueError("at least one metric split is required")

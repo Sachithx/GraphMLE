@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from eval.significance import ACCEPTANCE_THRESHOLD, decide_significance
 from guards.sandbox import run_in_sandbox
-from pipeline.graph import OperatorGraph
+from pipeline.graph import GraphValidationError, OperatorGraph
 from pipeline.registry import OperatorRegistry, default_registry
 
 from .ablate import Ablator
@@ -50,6 +50,7 @@ class LoopConfig(ConfigModel):
     convergence_delta: float = 0.002
     significance_threshold: float = ACCEPTANCE_THRESHOLD
     confirm_small_deltas: bool = True
+    validation_reproposal_attempts: int = 3
     repair_attempts: int = 3
 
 
@@ -267,6 +268,8 @@ class ProductionEvaluator:
             str(output_dir),
             "--seed",
             str(seed),
+            "--metric-splits",
+            "valid",
         ]
         sandbox = run_in_sandbox(
             command,
@@ -354,7 +357,7 @@ class AgentRunner:
             max_retries=self.config.llm.max_retries,
             reasoning_effort=self.config.llm.repair_reasoning_effort,
         )
-        return LiveHypothesisProposer(proposal_client), repair_client
+        return LiveHypothesisProposer(proposal_client, self.registry), repair_client
 
     def _evaluator(self) -> Evaluator:
         if self.config.evaluation.mode == "synthetic":
@@ -411,7 +414,10 @@ class AgentRunner:
         cumulative_tokens = TokenUsage()
         recent_deltas: list[float] = []
         arm_observations: list[ArmObservation] = []
+        invalid_hypothesis_ids: list[str] = []
         completed = 0
+        executed_iterations = 0
+        rejected_proposals = 0
         stop_reason: str | None = None
 
         while True:
@@ -426,11 +432,17 @@ class AgentRunner:
             iteration_start = time.monotonic()
             errors: list[str] = []
             recovery_events: list[dict[str, Any]] = []
-            proposal_usage = TokenUsage()
+            proposal_rejections: list[dict[str, Any]] = []
             candidate_graph = incumbent_graph
-            metrics = incumbent_metrics
+            metrics: dict[str, float] | None = None
             diff = ""
             decision_payload: dict[str, Any]
+            iteration_tokens = TokenUsage()
+            hypothesis: Hypothesis | None = None
+            mutation = None
+            last_validation_error: GraphValidationError | None = None
+            executed = False
+            proposal_calls = 0
 
             ablation_table = ablator.run(
                 incumbent_graph,
@@ -444,58 +456,120 @@ class AgentRunner:
                 key=lambda node: -float(ablation_table[node].get("removal_cost", 0.0)),
             )
             preferred_target = scheduler.select_arm(target_arms, arm_observations)
-            proposal: ProposalResult = proposer.propose(
-                graph=incumbent_graph,
-                ablation_table=ablation_table,
-                recent_outcomes=memory.last_outcomes(10),
-                rejected_hypotheses=memory.rejected_hypothesis_ids(),
-                preferred_target=preferred_target,
-            )
-            hypothesis = proposal.hypothesis
-            proposal_usage = proposal.usage
-            iteration_tokens = proposal_usage
+            def evaluate_candidate(repaired: OperatorGraph) -> dict[str, float]:
+                return evaluator.evaluate(
+                    repaired,
+                    iteration_dir,
+                    incumbent_primary=incumbent_metrics["primary"],
+                ).metrics
+
+            for proposal_attempt in range(loop.validation_reproposal_attempts + 1):
+                try:
+                    proposal_calls += 1
+                    proposal: ProposalResult = proposer.propose(
+                        graph=incumbent_graph,
+                        ablation_table=ablation_table,
+                        recent_outcomes=memory.last_outcomes(10),
+                        rejected_hypotheses=[
+                            *memory.rejected_hypothesis_ids(),
+                            *invalid_hypothesis_ids,
+                        ],
+                        preferred_target=preferred_target,
+                        proposal_feedback=[
+                            str(item["error"]) for item in proposal_rejections
+                        ],
+                    )
+                    hypothesis = proposal.hypothesis
+                    iteration_tokens = iteration_tokens + proposal.usage
+                except Exception as exc:
+                    errors.append(f"proposal request failed: {type(exc).__name__}: {exc}")
+                    break
+                try:
+                    mutation = apply_hypothesis(
+                        incumbent_graph,
+                        hypothesis,
+                        self.registry,
+                        generated_feature_dir=self.run_dir / "generated_features",
+                    )
+                    candidate_graph = mutation.graph
+                    break
+                except GraphValidationError as exc:
+                    last_validation_error = exc
+                    rejected_proposals += 1
+                    invalid_hypothesis_ids.append(hypothesis.id)
+                    proposal_rejections.append(
+                        {
+                            "attempt": proposal_attempt + 1,
+                            "hypothesis_id": hypothesis.id,
+                            "error": f"{type(exc).__name__}: {exc}",
+                            "patch": hypothesis.patch.model_dump(mode="json"),
+                        }
+                    )
 
             try:
-                mutation = apply_hypothesis(
-                    incumbent_graph,
-                    hypothesis,
-                    self.registry,
-                    generated_feature_dir=self.run_dir / "generated_features",
-                )
-                candidate_graph = mutation.graph
-
-                def evaluate_candidate(repaired: OperatorGraph) -> dict[str, float]:
-                    return evaluator.evaluate(
-                        repaired,
-                        iteration_dir,
-                        incumbent_primary=incumbent_metrics["primary"],
-                    ).metrics
-
-                try:
-                    metrics = evaluate_candidate(candidate_graph)
-                except Exception as exc:
-                    errors.append(f"{type(exc).__name__}: {exc}")
-                    if structured_client is None:
-                        repair_provider = CannedRepairProvider()
-                    else:
-                        repair_provider = LLMRepairProvider(
-                            structured_client, self.registry, hypothesis
-                        )
+                if mutation is None:
+                    if (
+                        last_validation_error is None
+                        or hypothesis is None
+                        or structured_client is None
+                    ):
+                        raise RuntimeError("proposal validation retries exhausted")
+                    repair_provider = LLMRepairProvider(
+                        structured_client,
+                        self.registry,
+                        hypothesis,
+                        generated_feature_dir=self.run_dir / "generated_features",
+                    )
                     outcome = RepairManager(
                         repair_provider, max_attempts=loop.repair_attempts
-                    ).recover(candidate_graph, exc, evaluate_candidate)
+                    ).recover(
+                        incumbent_graph,
+                        last_validation_error,
+                        evaluate_candidate,
+                    )
                     errors = outcome.errors
                     recovery_events = outcome.events
-                    repair_usage = getattr(
-                        repair_provider, "usage", TokenUsage()
-                    )
-                    iteration_tokens = iteration_tokens + repair_usage
+                    iteration_tokens = iteration_tokens + repair_provider.usage
                     if not outcome.recovered or outcome.metrics is None:
-                        raise RuntimeError("repair attempts exhausted")
+                        raise RuntimeError("graph-validation repair attempts exhausted")
                     candidate_graph = outcome.graph
                     metrics = outcome.metrics
+                    executed = True
+                else:
+                    try:
+                        metrics = evaluate_candidate(candidate_graph)
+                        executed = True
+                    except Exception as exc:
+                        errors.append(f"{type(exc).__name__}: {exc}")
+                        if hypothesis is None:
+                            raise RuntimeError("runtime repair requires a hypothesis") from exc
+                        if structured_client is None:
+                            repair_provider = CannedRepairProvider()
+                        else:
+                            repair_provider = LLMRepairProvider(
+                                structured_client,
+                                self.registry,
+                                hypothesis,
+                                generated_feature_dir=self.run_dir / "generated_features",
+                            )
+                        outcome = RepairManager(
+                            repair_provider, max_attempts=loop.repair_attempts
+                        ).recover(candidate_graph, exc, evaluate_candidate)
+                        errors = outcome.errors
+                        recovery_events = outcome.events
+                        repair_usage = getattr(repair_provider, "usage", TokenUsage())
+                        iteration_tokens = iteration_tokens + repair_usage
+                        if not outcome.recovered or outcome.metrics is None:
+                            raise RuntimeError("runtime repair attempts exhausted")
+                        candidate_graph = outcome.graph
+                        metrics = outcome.metrics
+                        executed = True
 
-                raw_delta = metrics["primary"] - incumbent_metrics["primary"]
+                if metrics is None:
+                    raise RuntimeError("executed candidate returned no metrics")
+                raw_delta: float | None = (
+                    metrics["primary"] - incumbent_metrics["primary"]
+                )
                 seed_scores = None
                 if (
                     loop.confirm_small_deltas
@@ -517,13 +591,16 @@ class AgentRunner:
             except Exception as exc:
                 if not errors or errors[-1] != f"{type(exc).__name__}: {exc}":
                     errors.append(f"{type(exc).__name__}: {exc}")
-                raw_delta = 0.0
+                raw_delta = (
+                    metrics["primary"] - incumbent_metrics["primary"]
+                    if executed and metrics is not None
+                    else None
+                )
                 accepted = False
-                metrics = incumbent_metrics
                 decision_payload = {
                     "accepted": False,
                     "reason": "execution_failed",
-                    "raw_delta": 0.0,
+                    "raw_delta": raw_delta,
                     "threshold": loop.significance_threshold,
                     "seeds": 0,
                     "seed_mean": None,
@@ -541,11 +618,16 @@ class AgentRunner:
             record = {
                 "iteration": iteration,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "hypothesis": hypothesis.model_dump(mode="json"),
+                "hypothesis": (
+                    hypothesis.model_dump(mode="json") if hypothesis is not None else None
+                ),
+                "proposal_rejections": proposal_rejections,
+                "proposal_attempts": proposal_calls,
                 "ablation_table": ablation_table,
                 "diff": diff,
                 "metrics": metrics,
                 "delta_vs_incumbent": raw_delta,
+                "executed": executed,
                 "accepted": accepted,
                 "significance": decision_payload,
                 "errors": errors,
@@ -560,16 +642,19 @@ class AgentRunner:
             }
             with run_log.open("a") as handle:
                 handle.write(json.dumps(record, sort_keys=True) + "\n")
-            memory.record(
-                hypothesis_id=hypothesis.id,
-                accepted=accepted,
-                target_node=hypothesis.target_node,
-                delta=raw_delta,
-                reason=str(decision_payload["reason"]),
-            )
-            arm_observations.append(ArmObservation(hypothesis.target_node, raw_delta))
-            recent_deltas.append(raw_delta if accepted else 0.0)
-            if accepted:
+            if hypothesis is not None:
+                memory.record(
+                    hypothesis_id=hypothesis.id,
+                    accepted=accepted,
+                    target_node=hypothesis.target_node,
+                    delta=float(raw_delta or 0.0),
+                    reason=str(decision_payload["reason"]),
+                )
+            if executed and hypothesis is not None and raw_delta is not None:
+                executed_iterations += 1
+                arm_observations.append(ArmObservation(hypothesis.target_node, raw_delta))
+                recent_deltas.append(raw_delta)
+            if accepted and metrics is not None:
                 incumbent_graph = candidate_graph
                 incumbent_metrics = metrics
                 self._write_best(candidate_graph, iteration_dir)
@@ -578,6 +663,8 @@ class AgentRunner:
         summary = {
             "status": "completed",
             "iterations": completed,
+            "executed_iterations": executed_iterations,
+            "rejected_proposals": rejected_proposals,
             "stop_reason": stop_reason,
             "best_metrics": incumbent_metrics,
             "wall_clock_s": time.monotonic() - run_start,

@@ -33,9 +33,9 @@ def test_ablation_is_cached_until_topology_changes(tmp_path: Path) -> None:
             "patch": {
                 "op": "add_node",
                 "node": {
-                    "id": "temporal",
-                    "type": "features.temporal",
-                    "params": {},
+                    "id": "history",
+                    "type": "features.user_history",
+                    "params": {"windows": [1, 7]},
                     "inputs": ["load"],
                 },
             },
@@ -44,4 +44,3 @@ def test_ablation_is_cached_until_topology_changes(tmp_path: Path) -> None:
     changed = apply_hypothesis(graph, add, default_registry()).graph
     ablator.run(changed, 0.602, score_without)
     assert len(calls) == len(graph.nodes) + len(changed.nodes)
-

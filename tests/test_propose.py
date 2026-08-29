@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from pydantic import ValidationError
 
-from agent.propose import Hypothesis, apply_hypothesis, topology_signature
+from agent.llm import StructuredResult, TokenUsage
+from agent.propose import (
+    Hypothesis,
+    LiveHypothesisProposer,
+    apply_hypothesis,
+    topology_signature,
+)
 from pipeline.graph import GraphValidationError, OperatorGraph
 from pipeline.registry import default_registry
 
@@ -132,3 +140,53 @@ def test_add_node_can_atomically_replace_a_model_without_changing_its_id() -> No
     model = next(node for node in mutation.graph.nodes if node.id == "model")
     assert model.type == "model.lightgbm_rank"
     assert mutation.topology_changed
+
+
+def test_live_proposer_injects_registry_contracts_and_two_valid_graphs() -> None:
+    class CapturingClient:
+        instructions = ""
+        input_text = ""
+
+        def parse(self, schema, *, instructions, input_text):
+            self.instructions = instructions
+            self.input_text = input_text
+            return StructuredResult(
+                schema.model_validate(
+                    {
+                        "id": "h_catalog",
+                        "target_node": "model",
+                        "rationale": "exercise the catalog",
+                        "method_source": "unit test",
+                        "expected_delta": 0.001,
+                        "expected_cost_minutes": 1,
+                        "patch": {
+                            "op": "replace_params",
+                            "node": "model",
+                            "params": [{"name": "seed", "value": 7}],
+                        },
+                    }
+                ),
+                TokenUsage(),
+            )
+
+    client = CapturingClient()
+    registry = default_registry()
+    proposer = LiveHypothesisProposer(client, registry)
+    proposer.propose(
+        graph=seed_graph(),
+        ablation_table={},
+        recent_outcomes=[],
+        rejected_hypotheses=[],
+        proposal_feedback=["node model expects features input"],
+    )
+    payload = json.loads(client.input_text)
+    rank = next(
+        item for item in payload["operator_catalog"]
+        if item["type"] == "model.lightgbm_rank"
+    )
+    assert rank["inputs"] == ["features"]
+    assert rank["variadic"] is True
+    assert "objective" in rank["parameters"]
+    assert len(payload["valid_graph_examples"]) == 2
+    assert payload["validation_feedback_for_reproposal"]
+    assert "Respect every input/output signature" in client.instructions

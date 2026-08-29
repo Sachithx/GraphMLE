@@ -134,7 +134,7 @@ def execute_graph(
     prediction = _prediction_from_terminal(terminal)
     metrics: dict[str, dict[str, float]] = {}
     if prediction is not None:
-        for split in ("valid", "test"):
+        for split in ctx.metric_splits:
             frame = prediction.data.frames[split]
             metrics[split] = evaluate_official(
                 frame["user_id"].tolist(),
@@ -165,10 +165,23 @@ def main() -> None:
     )
     parser.add_argument("--output-dir", type=Path, default=root / "runs" / "manual")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--metric-splits",
+        nargs="+",
+        choices=("valid", "test"),
+        default=("valid", "test"),
+        help="labeled splits to score; Phase 5 passes only valid",
+    )
     args = parser.parse_args()
     result = execute_graph(
         OperatorGraph.from_path(args.graph),
-        ExecutionContext(args.data_dir, args.starter_kit, args.output_dir, args.seed),
+        ExecutionContext(
+            args.data_dir,
+            args.starter_kit,
+            args.output_dir,
+            args.seed,
+            metric_splits=tuple(args.metric_splits),
+        ),
     )
     print(json.dumps({"metrics": result.metrics, "wall_clock_s": result.wall_clock_s}, indent=2))
 
