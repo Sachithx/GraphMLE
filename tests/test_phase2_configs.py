@@ -16,3 +16,6 @@ def test_three_handwritten_graphs_validate() -> None:
     for path in paths:
         graph = OperatorGraph.from_path(path)
         assert graph.validate(registry)
+    assert OperatorGraph.from_path(ROOT / "configs" / "pipeline_seed.json").validate(
+        registry
+    )

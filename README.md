@@ -76,3 +76,38 @@ make test
 
 Archive and starter-kit checksums recorded during the passing run are in
 `data/README.md`.
+
+## Phase 2 operator graph
+
+Pipelines are JSON DAGs whose nodes and edges are validated before any model
+compute. `pipeline/registry.py` declares the input signature, output type, and
+callable for every supported node. Validation rejects duplicate IDs, unknown
+types, missing inputs, cycles, arity errors, and edge-type mismatches.
+
+The implemented node surface is:
+
+- `data.load`
+- `features.raw_categorical`, `features.user_history`,
+  `features.item_popularity`, `features.user_category_affinity`,
+  `features.video_duration`, `features.temporal`
+- `model.fm_baseline`, `model.lightgbm_binary`, `model.lightgbm_rank`,
+  `model.torch_deepfm`, `model.torch_multitask`
+- `ensemble.rank_average`, `ensemble.seed_bag`
+- `submit.rank`
+
+Historical feature builders follow the fixed
+`build(train_df, target_df, ctx)` contract and use only training rows with dates
+strictly earlier than each target date. `submit.rank` writes the candidate and
+delegates validation to the starter kit's unmodified `submit.py --check`.
+
+Run the Phase 2 acceptance gate with:
+
+```bash
+make phase2-gate
+```
+
+It executes the three hand-written `configs/phase2_*.json` graphs and requires
+three distinct official validation scores plus three checker-valid submissions.
+The FM-equivalent starting point for later agent phases is
+`configs/pipeline_seed.json`. Results are written to
+`runs/phase2/results.json`.
