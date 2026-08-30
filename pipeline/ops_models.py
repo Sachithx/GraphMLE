@@ -316,10 +316,23 @@ def op_lightgbm_rank(
 
     prepared = prepare_features(_require_features(inputs))
     seed = int(params.get("seed", ctx.seed))
-    users = prepared.data.frames["train"]["user_id"].astype(str).to_numpy()
-    order = np.argsort(users, kind="stable")
-    _, groups = np.unique(users[order], return_counts=True)
-    labels = prepared.data.frames["train"]["long_view"].to_numpy(dtype=np.int8)
+    train_frame = prepared.data.frames["train"]
+    # Group construction decides which pairs LambdaRank compares. Grouping by user
+    # alone pools all 14 training days into one ~43-item query, so most pairs span
+    # days that were never shown together. "user_date" instead builds one query per
+    # co-exposure day (~5.8 items), matching the ~5.6 items the metric ranks.
+    group_by = str(params.get("group_by", "user"))
+    if group_by == "user":
+        keys = train_frame["user_id"].astype(str).to_numpy()
+    elif group_by == "user_date":
+        keys = (
+            train_frame["user_id"].astype(str) + "|" + train_frame["date"].astype(str)
+        ).to_numpy()
+    else:
+        raise ValueError(f"unsupported group_by {group_by!r}; use user or user_date")
+    order = np.argsort(keys, kind="stable")
+    _, groups = np.unique(keys[order], return_counts=True)
+    labels = train_frame["long_view"].to_numpy(dtype=np.int8)
     model = lgb.LGBMRanker(
         objective=str(params.get("objective", "lambdarank")),
         metric="ndcg",

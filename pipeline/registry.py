@@ -131,6 +131,7 @@ OPERATOR_PARAMETERS: dict[str, dict[str, str]] = {
     },
     "model.lightgbm_rank": {
         "objective": "string, default lambdarank",
+        "group_by": "user | user_date, default user; user_date builds one query per co-exposure day",
         "seed": "int",
         "n_estimators": "int, default 200",
         "num_leaves": "int, default 31",

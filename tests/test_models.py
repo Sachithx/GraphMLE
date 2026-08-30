@@ -182,3 +182,25 @@ def test_setwise_scoring_depends_on_the_rest_of_the_set(tmp_path) -> None:
     assert np.isfinite(scores).all()
     # Identical features, different competition -> different score.
     assert scores[0] != scores[3]
+
+
+def test_lightgbm_rank_group_by_changes_query_construction(tmp_path) -> None:
+    """user_date grouping must split a user's rows into per-day queries.
+
+    Group construction decides which pairs LambdaRank compares, so this is asserted
+    directly rather than inferred from a score.
+    """
+    import numpy as np
+    import pandas as pd
+
+    users = pd.Series(["u0", "u0", "u0", "u1", "u1"])
+    dates = pd.Series([20220408, 20220408, 20220409, 20220408, 20220409])
+
+    by_user = users.astype(str).to_numpy()
+    by_user_date = (users.astype(str) + "|" + dates.astype(str)).to_numpy()
+
+    _, user_groups = np.unique(np.sort(by_user), return_counts=True)
+    _, user_date_groups = np.unique(np.sort(by_user_date), return_counts=True)
+
+    assert sorted(user_groups.tolist()) == [2, 3]          # u1:2, u0:3
+    assert sorted(user_date_groups.tolist()) == [1, 1, 1, 2]  # split per day

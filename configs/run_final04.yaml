@@ -1,0 +1,36 @@
+# final_04 — scored autonomous run.
+#
+# Starts from the FM-equivalent seed (configs/pipeline_seed.json) so the run
+# demonstrates Task Requirement 1 (reproduce the official baseline) before it
+# improves on it. Convergence uses the organizers' published rule verbatim
+# (epsilon = 0.002, N = 3), with their 50-iteration and 6-hour ceilings as the
+# backstops. The operator registry is the agent's action space; which operators
+# to compose, with what parameters, is the agent's decision.
+seed_graph: configs/pipeline_seed.json
+loop:
+  max_iterations: 50
+  max_wall_clock_s: 21600
+  iteration_timeout_s: 1800
+  memory_limit_mb: 8192
+  # Official convergence rule from the problem statement (section 2.4).
+  convergence_window: 3
+  convergence_delta: 0.002
+  significance_threshold: 0.0016
+  confirm_small_deltas: true
+  # MLE-STAR style nested loop: explore several variants of the ablated
+  # component before moving on, counted as one outer refinement.
+  inner_refinement_attempts: 4
+  validation_reproposal_attempts: 3
+  repair_attempts: 3
+evaluation:
+  mode: production
+  data_dir: data/kuairand-pure/data
+  starter_kit_dir: data/starter-kit
+  baseline_primary: 0.6014687563529677
+llm:
+  mode: live
+  model: gpt-5.6-terra
+  repair_model: gpt-5.6-luna
+  reasoning_effort: low
+  repair_reasoning_effort: low
+  max_retries: 3
