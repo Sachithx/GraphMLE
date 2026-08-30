@@ -1,0 +1,32 @@
+# final_05 - continuation restart.
+#
+# Seeds from final_04's converged graph (FM over raw + static_side, validation
+# primary 0.602689). Baseline reproduction is demonstrated in final_04, which
+# started from the exact-baseline graph; this run explores onward from the best
+# autonomous result rather than re-deriving it. Same organizer convergence rule
+# and ceilings. No human edits the graph: the seed is the agent's own output.
+seed_graph: runs/final_04/best/graph.json
+loop:
+  max_iterations: 50
+  max_wall_clock_s: 21600
+  iteration_timeout_s: 1800
+  memory_limit_mb: 8192
+  convergence_window: 3
+  convergence_delta: 0.002
+  significance_threshold: 0.0016
+  confirm_small_deltas: true
+  inner_refinement_attempts: 4
+  validation_reproposal_attempts: 3
+  repair_attempts: 3
+evaluation:
+  mode: production
+  data_dir: data/kuairand-pure/data
+  starter_kit_dir: data/starter-kit
+  baseline_primary: 0.6014687563529677
+llm:
+  mode: live
+  model: gpt-5.6-terra
+  repair_model: gpt-5.6-luna
+  reasoning_effort: low
+  repair_reasoning_effort: low
+  max_retries: 3

@@ -1,12 +1,15 @@
 # final_04 — scored autonomous run.
 #
-# Starts from the FM-equivalent seed (configs/pipeline_seed.json) so the run
-# demonstrates Task Requirement 1 (reproduce the official baseline) before it
-# improves on it. Convergence uses the organizers' published rule verbatim
+# Starts from configs/phase2_fm.json, which reproduces the official baseline
+# validation primary exactly (0.6014687563529677), satisfying Task Requirement 1
+# before the agent improves on it. Note that configs/pipeline_seed.json is no
+# longer baseline-equivalent: once model.fm_baseline was fixed to actually consume
+# its feature inputs, that graph's duration/temporal bundles began degrading it
+# to 0.5916. Convergence uses the organizers' published rule verbatim
 # (epsilon = 0.002, N = 3), with their 50-iteration and 6-hour ceilings as the
 # backstops. The operator registry is the agent's action space; which operators
 # to compose, with what parameters, is the agent's decision.
-seed_graph: configs/pipeline_seed.json
+seed_graph: configs/phase2_fm.json
 loop:
   max_iterations: 50
   max_wall_clock_s: 21600

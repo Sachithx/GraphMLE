@@ -1,0 +1,35 @@
+# final_06 - restart with corrected proposer search strategy.
+#
+# final_03/04/05 showed the proposer defaulting to wholesale model substitution,
+# which lost in every instance, while never trying the ensemble operators. The
+# SYSTEM_PROMPT search-strategy guidance was rewritten between runs to reflect that
+# measured history (additive over substitutive, seed variance reduction first).
+# This is agent development between runs, not an intervention inside a scored run.
+#
+# Seeds from final_04's converged graph; baseline reproduction is demonstrated in
+# final_04. Organizer convergence rule and ceilings unchanged.
+seed_graph: runs/final_04/best/graph.json
+loop:
+  max_iterations: 50
+  max_wall_clock_s: 21600
+  iteration_timeout_s: 1800
+  memory_limit_mb: 8192
+  convergence_window: 3
+  convergence_delta: 0.002
+  significance_threshold: 0.0016
+  confirm_small_deltas: true
+  inner_refinement_attempts: 4
+  validation_reproposal_attempts: 3
+  repair_attempts: 3
+evaluation:
+  mode: production
+  data_dir: data/kuairand-pure/data
+  starter_kit_dir: data/starter-kit
+  baseline_primary: 0.6014687563529677
+llm:
+  mode: live
+  model: gpt-5.6-terra
+  repair_model: gpt-5.6-luna
+  reasoning_effort: low
+  repair_reasoning_effort: low
+  max_retries: 3

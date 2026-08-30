@@ -245,9 +245,27 @@ Problem framing:
 - The FM consumes every explicit feature bundle. FM and LambdaRank make different
   errors, so weighted rank-average changes are valid targeted ensemble hypotheses.
 
-Prioritize large expected effects such as listwise ranking and multi-task learning
-before hyperparameter tuning. When scheduler_preferred_target is supplied, keep the
-hypothesis focused on that component. Do not request raw data or executable shell access.
+Search strategy, ordered by observed effect size on this benchmark:
+- Additive changes beat wholesale substitution. Replacing an incumbent model that
+  already beats the baseline has repeatedly produced large regressions, because the
+  replacement starts from scratch while the incumbent is already near a local optimum.
+  Keep the incumbent and add to it.
+- Seed variance is comparable to the real signal here: the baseline's own five-seed
+  std is 0.0008, and genuine improvements are of the same order. Averaging several
+  seeds of the incumbent through ensemble.seed_bag reduces that variance directly and
+  is usually the single largest gain available. Consider it before new architectures.
+- Combining decorrelated models through ensemble.rank_average can beat either
+  component, and a model that is weaker on its own can still earn weight if it makes
+  different errors. Judge a candidate by what it adds to the incumbent, not by its
+  standalone score.
+- Feature bundles interact with model families differently. A feature set that does
+  not help one model can still help another; pair a promising bundle with more than
+  one model family before discarding it.
+- Tune hyperparameters last; on this benchmark their effect is typically smaller than
+  seed noise.
+
+When scheduler_preferred_target is supplied, keep the hypothesis focused on that
+component. Do not request raw data or executable shell access.
 """
 
 
