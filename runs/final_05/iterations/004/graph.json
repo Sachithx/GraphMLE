@@ -1,0 +1,64 @@
+{
+  "nodes": [
+    {
+      "id": "load",
+      "type": "data.load",
+      "params": {},
+      "inputs": []
+    },
+    {
+      "id": "raw",
+      "type": "features.raw_categorical",
+      "params": {},
+      "inputs": [
+        "load"
+      ]
+    },
+    {
+      "id": "out",
+      "type": "submit.rank",
+      "params": {
+        "filename": "submission.csv"
+      },
+      "inputs": [
+        "model"
+      ]
+    },
+    {
+      "id": "static_side",
+      "type": "features.static_side",
+      "params": {},
+      "inputs": [
+        "load"
+      ]
+    },
+    {
+      "id": "model",
+      "type": "model.torch_deepfm",
+      "params": {
+        "batch_size": 8192,
+        "device": "auto",
+        "dropout": 0.1,
+        "embedding_dim": 16,
+        "epochs": 3,
+        "hidden_dim": 64,
+        "lr": 0.001,
+        "patience": 3,
+        "prediction_batch_size": 65536,
+        "seed": 0,
+        "threads": 4,
+        "weight_decay": 1e-06
+      },
+      "inputs": [
+        "raw",
+        "static_side"
+      ]
+    }
+  ],
+  "meta": {
+    "name": "phase2_fm",
+    "hypothesis_id": "replace_fm_with_deepfm",
+    "parent": "add_static_side_features_to_fm",
+    "expected_delta": 0.008
+  }
+}

@@ -1,0 +1,42 @@
+--- incumbent/graph.json
++++ candidate/graph.json
+@@ -1,9 +1,9 @@
+ {
+   "meta": {
+-    "expected_delta": 0.006,
+-    "hypothesis_id": "add_static_side_features_to_fm",
++    "expected_delta": 0.0015,
++    "hypothesis_id": "add_item_popularity_to_fm",
+     "name": "phase2_fm",
+-    "parent": "handwritten_fm"
++    "parent": "add_static_side_features_to_fm"
+   },
+   "nodes": [
+     {
+@@ -24,7 +24,8 @@
+       "id": "model",
+       "inputs": [
+         "raw",
+-        "static_side"
++        "static_side",
++        "item_popularity"
+       ],
+       "params": {
+         "seed": 0
+@@ -48,6 +49,16 @@
+       ],
+       "params": {},
+       "type": "features.static_side"
++    },
++    {
++      "id": "item_popularity",
++      "inputs": [
++        "load"
++      ],
++      "params": {
++        "smoothing": 20.0
++      },
++      "type": "features.item_popularity"
+     }
+   ]
+ }

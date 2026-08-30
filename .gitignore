@@ -12,5 +12,20 @@ __pycache__/
 # Downloaded competition assets and generated run artifacts.
 data/kuairand-pure/
 data/starter-kit/
+# Run artifacts are large; keep the evidence for the scored runs and drop the
+# intermediate per-iteration submission CSVs, which are ~5 MB each and fully
+# regenerable from the graph beside them.
 runs/*
 !runs/.gitkeep
+!runs/final_03/
+!runs/final_04/
+!runs/final_05/
+!runs/final_06/
+runs/*/iterations/*/submission.csv
+runs/*/iterations/*/significance/*/submission.csv
+runs/*/ablations/**
+runs/*/initial/submission.csv
+runs/*/generated_features/
+# The scored run's designated final submission is a deliverable and is kept.
+!runs/final_06/best/submission.csv
+!runs/final_04/best/submission.csv

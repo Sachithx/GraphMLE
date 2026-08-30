@@ -1,0 +1,39 @@
+{
+  "outcomes": [
+    {
+      "hypothesis_id": "add_strict_user_history_features",
+      "accepted": false,
+      "target_node": "raw",
+      "delta": -0.002968258433127424,
+      "reason": "not_significant"
+    },
+    {
+      "hypothesis_id": "replace_fm_with_multitask_auxiliary_model",
+      "accepted": false,
+      "target_node": "fm",
+      "delta": -0.06101440733104713,
+      "reason": "not_significant"
+    },
+    {
+      "hypothesis_id": "add_user_category_affinity_feature",
+      "accepted": false,
+      "target_node": "ranker",
+      "delta": -0.0016231876545830248,
+      "reason": "not_significant"
+    },
+    {
+      "hypothesis_id": "add_video_duration_feature_to_blended_rankers",
+      "accepted": false,
+      "target_node": "fm",
+      "delta": -0.00016635623541161326,
+      "reason": "not_significant"
+    },
+    {
+      "hypothesis_id": "tune_popularity_smoothing_for_sparse_item_signal",
+      "accepted": false,
+      "target_node": "pop",
+      "delta": -0.0006509157099604534,
+      "reason": "not_significant"
+    }
+  ]
+}

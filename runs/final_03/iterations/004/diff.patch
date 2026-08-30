@@ -1,0 +1,51 @@
+--- incumbent/graph.json
++++ candidate/graph.json
+@@ -1,8 +1,9 @@
+ {
+   "meta": {
+-    "hypothesis_id": "seed_feature_aware_fm_rank_blend",
++    "expected_delta": 0.0025,
++    "hypothesis_id": "add_video_duration_feature_to_blended_rankers",
+     "name": "pipeline_seed_final03",
+-    "parent": "final_02",
++    "parent": "seed_feature_aware_fm_rank_blend",
+     "validation_evidence": {
+       "fm_weight": 0.65,
+       "previous_best_primary": 0.601468756,
+@@ -39,7 +40,8 @@
+       "id": "fm",
+       "inputs": [
+         "raw",
+-        "pop"
++        "pop",
++        "duration"
+       ],
+       "params": {
+         "numeric_bins": 32,
+@@ -51,7 +53,8 @@
+       "id": "ranker",
+       "inputs": [
+         "raw",
+-        "pop"
++        "pop",
++        "duration"
+       ],
+       "params": {
+         "lr": 0.05,
+@@ -85,6 +88,16 @@
+         "filename": "submission.csv"
+       },
+       "type": "submit.rank"
++    },
++    {
++      "id": "duration",
++      "inputs": [
++        "load"
++      ],
++      "params": {
++        "buckets": 10
++      },
++      "type": "features.video_duration"
+     }
+   ]
+ }

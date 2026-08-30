@@ -1,0 +1,106 @@
+{
+  "nodes": [
+    {
+      "id": "load",
+      "type": "data.load",
+      "params": {},
+      "inputs": []
+    },
+    {
+      "id": "raw",
+      "type": "features.raw_categorical",
+      "params": {},
+      "inputs": [
+        "load"
+      ]
+    },
+    {
+      "id": "pop",
+      "type": "features.item_popularity",
+      "params": {
+        "smoothing": 20
+      },
+      "inputs": [
+        "load"
+      ]
+    },
+    {
+      "id": "fm",
+      "type": "model.fm_baseline",
+      "params": {
+        "seed": 0,
+        "numeric_bins": 32
+      },
+      "inputs": [
+        "raw",
+        "pop",
+        "user_history"
+      ]
+    },
+    {
+      "id": "ranker",
+      "type": "model.lightgbm_rank",
+      "params": {
+        "objective": "lambdarank",
+        "n_estimators": 100,
+        "num_leaves": 31,
+        "lr": 0.05,
+        "seed": 0
+      },
+      "inputs": [
+        "raw",
+        "pop",
+        "user_history"
+      ]
+    },
+    {
+      "id": "blend",
+      "type": "ensemble.rank_average",
+      "params": {
+        "weights": [
+          0.65,
+          0.35
+        ]
+      },
+      "inputs": [
+        "fm",
+        "ranker"
+      ]
+    },
+    {
+      "id": "out",
+      "type": "submit.rank",
+      "params": {
+        "filename": "submission.csv"
+      },
+      "inputs": [
+        "blend"
+      ]
+    },
+    {
+      "id": "user_history",
+      "type": "features.user_history",
+      "params": {
+        "windows": [
+          1,
+          7
+        ]
+      },
+      "inputs": [
+        "load"
+      ]
+    }
+  ],
+  "meta": {
+    "name": "pipeline_seed_final03",
+    "parent": "seed_feature_aware_fm_rank_blend",
+    "hypothesis_id": "add_strict_user_history_features",
+    "validation_evidence": {
+      "fm_weight": 0.65,
+      "ranker_weight": 0.35,
+      "primary": 0.602609425,
+      "previous_best_primary": 0.601468756
+    },
+    "expected_delta": 0.006
+  }
+}

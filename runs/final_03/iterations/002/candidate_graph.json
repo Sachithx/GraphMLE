@@ -1,0 +1,103 @@
+{
+  "nodes": [
+    {
+      "id": "load",
+      "type": "data.load",
+      "params": {},
+      "inputs": []
+    },
+    {
+      "id": "raw",
+      "type": "features.raw_categorical",
+      "params": {},
+      "inputs": [
+        "load"
+      ]
+    },
+    {
+      "id": "pop",
+      "type": "features.item_popularity",
+      "params": {
+        "smoothing": 20
+      },
+      "inputs": [
+        "load"
+      ]
+    },
+    {
+      "id": "ranker",
+      "type": "model.lightgbm_rank",
+      "params": {
+        "objective": "lambdarank",
+        "n_estimators": 100,
+        "num_leaves": 31,
+        "lr": 0.05,
+        "seed": 0
+      },
+      "inputs": [
+        "raw",
+        "pop"
+      ]
+    },
+    {
+      "id": "blend",
+      "type": "ensemble.rank_average",
+      "params": {
+        "weights": [
+          0.65,
+          0.35
+        ]
+      },
+      "inputs": [
+        "fm",
+        "ranker"
+      ]
+    },
+    {
+      "id": "out",
+      "type": "submit.rank",
+      "params": {
+        "filename": "submission.csv"
+      },
+      "inputs": [
+        "blend"
+      ]
+    },
+    {
+      "id": "fm",
+      "type": "model.torch_multitask",
+      "params": {
+        "auxiliary_targets": [
+          "click"
+        ],
+        "batch_size": 8192,
+        "device": "auto",
+        "dropout": 0.1,
+        "embedding_dim": 16,
+        "epochs": 3,
+        "hidden_dim": 64,
+        "lr": 0.001,
+        "prediction_batch_size": 65536,
+        "seed": 0,
+        "threads": 4,
+        "weight_decay": 1e-06
+      },
+      "inputs": [
+        "raw",
+        "pop"
+      ]
+    }
+  ],
+  "meta": {
+    "name": "pipeline_seed_final03",
+    "parent": "replace_fm_with_multitask_auxiliary_model",
+    "hypothesis_id": "repair_multitask_auxiliary_targets",
+    "validation_evidence": {
+      "fm_weight": 0.65,
+      "ranker_weight": 0.35,
+      "primary": 0.602609425,
+      "previous_best_primary": 0.601468756
+    },
+    "expected_delta": 0.0
+  }
+}

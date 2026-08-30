@@ -1,0 +1,32 @@
+{
+  "outcomes": [
+    {
+      "hypothesis_id": "replace_fm_with_lambdarank",
+      "accepted": false,
+      "target_node": "model",
+      "delta": -0.004972132403635365,
+      "reason": "not_significant"
+    },
+    {
+      "hypothesis_id": "replace_fm_with_setwise_rank",
+      "accepted": false,
+      "target_node": "model",
+      "delta": -0.0060266753905815484,
+      "reason": "not_significant"
+    },
+    {
+      "hypothesis_id": "replace_fm_with_multitask_auxiliary_learning",
+      "accepted": false,
+      "target_node": "model",
+      "delta": -0.0564876368300441,
+      "reason": "not_significant"
+    },
+    {
+      "hypothesis_id": "replace_fm_with_deepfm",
+      "accepted": false,
+      "target_node": "model",
+      "delta": -0.08935407917015381,
+      "reason": "not_significant"
+    }
+  ]
+}

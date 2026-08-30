@@ -1,0 +1,20 @@
+{
+  "status": "completed",
+  "iterations": 4,
+  "outer_iterations": 1,
+  "executed_iterations": 4,
+  "rejected_proposals": 0,
+  "stop_reason": "converged",
+  "best_metrics": {
+    "gauc": 0.6688093510335124,
+    "ndcg5": 0.5365682845792203,
+    "primary": 0.6026888178063663
+  },
+  "wall_clock_s": 2966.0100213065743,
+  "tokens": {
+    "in": 16123,
+    "out": 1944
+  },
+  "interventions": 0,
+  "run_dir": "/home/AD/sachith/TechJam/techjam-mle-agent/runs/final_05"
+}

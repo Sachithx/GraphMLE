@@ -1,0 +1,12 @@
+/home/AD/sachith/TechJam/techjam-mle-agent/pipeline/ops_models.py:630: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.encoder = nn.TransformerEncoder(layer, num_layers=n_layers)
+{
+  "metrics": {
+    "valid": {
+      "gauc": 0.6613848083987317,
+      "ndcg5": 0.5319394764328377,
+      "primary": 0.5966621424157847
+    }
+  },
+  "wall_clock_s": 259.93371900357306
+}

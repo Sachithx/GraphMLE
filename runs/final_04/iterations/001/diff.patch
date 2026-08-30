@@ -1,0 +1,44 @@
+--- incumbent/graph.json
++++ candidate/graph.json
+@@ -1,7 +1,9 @@
+ {
+   "meta": {
+-    "hypothesis_id": "handwritten_fm",
+-    "name": "phase2_fm"
++    "expected_delta": 0.025,
++    "hypothesis_id": "add_strict_history_features",
++    "name": "phase2_fm",
++    "parent": "handwritten_fm"
+   },
+   "nodes": [
+     {
+@@ -21,7 +23,8 @@
+     {
+       "id": "model",
+       "inputs": [
+-        "raw"
++        "raw",
++        "history"
+       ],
+       "params": {
+         "seed": 0
+@@ -37,6 +40,19 @@
+         "filename": "submission.csv"
+       },
+       "type": "submit.rank"
++    },
++    {
++      "id": "history",
++      "inputs": [
++        "load"
++      ],
++      "params": {
++        "windows": [
++          1,
++          7
++        ]
++      },
++      "type": "features.user_history"
+     }
+   ]
+ }

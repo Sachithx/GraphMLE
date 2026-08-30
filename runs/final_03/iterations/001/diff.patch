@@ -1,0 +1,54 @@
+--- incumbent/graph.json
++++ candidate/graph.json
+@@ -1,8 +1,9 @@
+ {
+   "meta": {
+-    "hypothesis_id": "seed_feature_aware_fm_rank_blend",
++    "expected_delta": 0.006,
++    "hypothesis_id": "add_strict_user_history_features",
+     "name": "pipeline_seed_final03",
+-    "parent": "final_02",
++    "parent": "seed_feature_aware_fm_rank_blend",
+     "validation_evidence": {
+       "fm_weight": 0.65,
+       "previous_best_primary": 0.601468756,
+@@ -39,7 +40,8 @@
+       "id": "fm",
+       "inputs": [
+         "raw",
+-        "pop"
++        "pop",
++        "user_history"
+       ],
+       "params": {
+         "numeric_bins": 32,
+@@ -51,7 +53,8 @@
+       "id": "ranker",
+       "inputs": [
+         "raw",
+-        "pop"
++        "pop",
++        "user_history"
+       ],
+       "params": {
+         "lr": 0.05,
+@@ -85,6 +88,19 @@
+         "filename": "submission.csv"
+       },
+       "type": "submit.rank"
++    },
++    {
++      "id": "user_history",
++      "inputs": [
++        "load"
++      ],
++      "params": {
++        "windows": [
++          1,
++          7
++        ]
++      },
++      "type": "features.user_history"
+     }
+   ]
+ }

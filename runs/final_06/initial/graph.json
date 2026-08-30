@@ -1,0 +1,53 @@
+{
+  "nodes": [
+    {
+      "id": "load",
+      "type": "data.load",
+      "params": {},
+      "inputs": []
+    },
+    {
+      "id": "raw",
+      "type": "features.raw_categorical",
+      "params": {},
+      "inputs": [
+        "load"
+      ]
+    },
+    {
+      "id": "model",
+      "type": "model.fm_baseline",
+      "params": {
+        "seed": 0
+      },
+      "inputs": [
+        "raw",
+        "static_side"
+      ]
+    },
+    {
+      "id": "out",
+      "type": "submit.rank",
+      "params": {
+        "filename": "submission.csv"
+      },
+      "inputs": [
+        "model"
+      ]
+    },
+    {
+      "id": "static_side",
+      "type": "features.static_side",
+      "params": {},
+      "inputs": [
+        "load"
+      ]
+    }
+  ],
+  "meta": {
+    "name": "phase2_fm",
+    "hypothesis_id": "add_static_side_features_to_fm",
+    "parent": "handwritten_fm",
+    "expected_delta": 0.006
+  }
+}

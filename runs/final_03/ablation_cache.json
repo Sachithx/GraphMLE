@@ -1,0 +1,39 @@
+{
+  "277ac6daa51c5fdbb29f6ebbc1b320b12d0898c74f19f485796170c03484f80e": {
+    "blend": {
+      "removal_cost": 0.0,
+      "score_without": 0.602609425012438,
+      "status": "not_ablatable:GraphValidationError"
+    },
+    "fm": {
+      "removal_cost": 0.002007162252051109,
+      "score_without": 0.6006022627603869,
+      "status": "scored"
+    },
+    "load": {
+      "removal_cost": 0.0,
+      "score_without": 0.602609425012438,
+      "status": "not_ablatable:ValueError"
+    },
+    "out": {
+      "removal_cost": 0.0,
+      "score_without": 0.602609425012438,
+      "status": "scored"
+    },
+    "pop": {
+      "removal_cost": 0.0005995171495569718,
+      "score_without": 0.602009907862881,
+      "status": "scored"
+    },
+    "ranker": {
+      "removal_cost": 0.001208604301658478,
+      "score_without": 0.6014008207107795,
+      "status": "scored"
+    },
+    "raw": {
+      "removal_cost": 0.021663143979536836,
+      "score_without": 0.5809462810329011,
+      "status": "scored"
+    }
+  }
+}

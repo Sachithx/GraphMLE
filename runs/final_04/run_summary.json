@@ -1,0 +1,19 @@
+{
+  "status": "completed",
+  "iterations": 3,
+  "outer_iterations": 1,
+  "executed_iterations": 3,
+  "rejected_proposals": 0,
+  "stop_reason": "converged",
+  "best_metrics": {
+    "gauc": 0.6688093510335124,
+    "ndcg5": 0.5365682845792203,
+    "primary": 0.6026888178063663
+  },
+  "wall_clock_s": 1604.3583158049732,
+  "tokens": {
+    "in": 11722,
+    "out": 900
+  },
+  "interventions": 0
+}

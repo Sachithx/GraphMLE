@@ -1,0 +1,60 @@
+--- incumbent/graph.json
++++ candidate/graph.json
+@@ -1,9 +1,9 @@
+ {
+   "meta": {
+-    "expected_delta": 0.006,
+-    "hypothesis_id": "add_static_side_features_to_fm",
++    "expected_delta": 0.02,
++    "hypothesis_id": "replace_fm_with_lambdarank",
+     "name": "phase2_fm",
+-    "parent": "handwritten_fm"
++    "parent": "add_static_side_features_to_fm"
+   },
+   "nodes": [
+     {
+@@ -19,17 +19,6 @@
+       ],
+       "params": {},
+       "type": "features.raw_categorical"
+-    },
+-    {
+-      "id": "model",
+-      "inputs": [
+-        "raw",
+-        "static_side"
+-      ],
+-      "params": {
+-        "seed": 0
+-      },
+-      "type": "model.fm_baseline"
+     },
+     {
+       "id": "out",
+@@ -48,6 +37,26 @@
+       ],
+       "params": {},
+       "type": "features.static_side"
++    },
++    {
++      "id": "model",
++      "inputs": [
++        "raw",
++        "static_side"
++      ],
++      "params": {
++        "colsample_bytree": 1,
++        "group_by": "user",
++        "lr": 0.05,
++        "min_child_samples": 20,
++        "n_estimators": 300,
++        "num_leaves": 31,
++        "objective": "lambdarank",
++        "reg_lambda": 0,
++        "seed": 0,
++        "subsample": 1
++      },
++      "type": "model.lightgbm_rank"
+     }
+   ]
+ }

@@ -1,0 +1,32 @@
+{
+  "outcomes": [
+    {
+      "hypothesis_id": "add_strict_user_history_to_fm",
+      "accepted": false,
+      "target_node": "model",
+      "delta": -0.0009825978947272107,
+      "reason": "not_significant"
+    },
+    {
+      "hypothesis_id": "add_item_popularity_to_fm",
+      "accepted": false,
+      "target_node": "model",
+      "delta": -0.00039595611360487837,
+      "reason": "not_significant"
+    },
+    {
+      "hypothesis_id": "add_user_category_affinity_to_fm",
+      "accepted": false,
+      "target_node": "model",
+      "delta": -0.0007758113121869581,
+      "reason": "not_significant"
+    },
+    {
+      "hypothesis_id": "add_author_affinity_to_fm",
+      "accepted": true,
+      "target_node": "model",
+      "delta": 0.00044873436888670515,
+      "reason": "confirmed_by_three_seed_rerun"
+    }
+  ]
+}

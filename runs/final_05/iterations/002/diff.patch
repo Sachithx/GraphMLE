@@ -1,0 +1,65 @@
+--- incumbent/graph.json
++++ candidate/graph.json
+@@ -1,9 +1,9 @@
+ {
+   "meta": {
+-    "expected_delta": 0.006,
+-    "hypothesis_id": "add_static_side_features_to_fm",
++    "expected_delta": 0.012,
++    "hypothesis_id": "replace_fm_with_setwise_rank",
+     "name": "phase2_fm",
+-    "parent": "handwritten_fm"
++    "parent": "add_static_side_features_to_fm"
+   },
+   "nodes": [
+     {
+@@ -19,17 +19,6 @@
+       ],
+       "params": {},
+       "type": "features.raw_categorical"
+-    },
+-    {
+-      "id": "model",
+-      "inputs": [
+-        "raw",
+-        "static_side"
+-      ],
+-      "params": {
+-        "seed": 0
+-      },
+-      "type": "model.fm_baseline"
+     },
+     {
+       "id": "out",
+@@ -48,6 +37,31 @@
+       ],
+       "params": {},
+       "type": "features.static_side"
++    },
++    {
++      "id": "model",
++      "inputs": [
++        "raw",
++        "static_side"
++      ],
++      "params": {
++        "d_model": 64,
++        "device": "auto",
++        "dropout": 0.1,
++        "embedding_dim": 16,
++        "epochs": 20,
++        "lr": 0.001,
++        "max_set_size": 48,
++        "n_heads": 4,
++        "n_layers": 2,
++        "patience": 3,
++        "seed": 0,
++        "set_batch_size": 256,
++        "threads": 4,
++        "train_group": "user_date",
++        "weight_decay": 1e-06
++      },
++      "type": "model.setwise_rank"
+     }
+   ]
+ }

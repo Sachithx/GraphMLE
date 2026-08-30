@@ -1,0 +1,24 @@
+{
+  "status": "success",
+  "command": [
+    "/home/AD/sachith/TechJam/techjam-mle-agent/.venv-phase5/bin/python",
+    "-m",
+    "pipeline.execute",
+    "/home/AD/sachith/TechJam/techjam-mle-agent/runs/final_06/iterations/004/significance/seed_29/candidate_graph.json",
+    "--data-dir",
+    "/home/AD/sachith/TechJam/techjam-mle-agent/data/kuairand-pure/data",
+    "--starter-kit",
+    "/home/AD/sachith/TechJam/techjam-mle-agent/data/starter-kit",
+    "--output-dir",
+    "/home/AD/sachith/TechJam/techjam-mle-agent/runs/final_06/iterations/004/significance/seed_29",
+    "--seed",
+    "29",
+    "--metric-splits",
+    "valid"
+  ],
+  "returncode": 0,
+  "timed_out": false,
+  "wall_clock_s": 332.2032796777785,
+  "stdout_path": "/home/AD/sachith/TechJam/techjam-mle-agent/runs/final_06/iterations/004/significance/seed_29/stdout.log",
+  "result_path": "/home/AD/sachith/TechJam/techjam-mle-agent/runs/final_06/iterations/004/significance/seed_29/sandbox_result.json"
+}

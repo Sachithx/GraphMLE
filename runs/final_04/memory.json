@@ -1,0 +1,25 @@
+{
+  "outcomes": [
+    {
+      "hypothesis_id": "add_strict_history_features",
+      "accepted": false,
+      "target_node": "raw",
+      "delta": -0.003441339275974009,
+      "reason": "not_significant"
+    },
+    {
+      "hypothesis_id": "add_item_popularity_to_fm",
+      "accepted": false,
+      "target_node": "raw",
+      "delta": -6.793564218821047e-05,
+      "reason": "not_significant"
+    },
+    {
+      "hypothesis_id": "add_static_side_features_to_fm",
+      "accepted": true,
+      "target_node": "raw",
+      "delta": 0.001220061453398591,
+      "reason": "confirmed_by_three_seed_rerun"
+    }
+  ]
+}

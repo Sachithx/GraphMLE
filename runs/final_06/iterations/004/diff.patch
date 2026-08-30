@@ -1,0 +1,43 @@
+--- incumbent/graph.json
++++ candidate/graph.json
+@@ -1,9 +1,9 @@
+ {
+   "meta": {
+-    "expected_delta": 0.006,
+-    "hypothesis_id": "add_static_side_features_to_fm",
++    "expected_delta": 0.0006,
++    "hypothesis_id": "add_author_affinity_to_fm",
+     "name": "phase2_fm",
+-    "parent": "handwritten_fm"
++    "parent": "add_static_side_features_to_fm"
+   },
+   "nodes": [
+     {
+@@ -24,7 +24,8 @@
+       "id": "model",
+       "inputs": [
+         "raw",
+-        "static_side"
++        "static_side",
++        "author_affinity"
+       ],
+       "params": {
+         "seed": 0
+@@ -48,6 +49,17 @@
+       ],
+       "params": {},
+       "type": "features.static_side"
++    },
++    {
++      "id": "author_affinity",
++      "inputs": [
++        "load"
++      ],
++      "params": {
++        "attribute": "author_id",
++        "smoothing": 20
++      },
++      "type": "features.user_attribute_affinity"
+     }
+   ]
+ }

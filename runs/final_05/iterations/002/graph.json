@@ -1,0 +1,67 @@
+{
+  "nodes": [
+    {
+      "id": "load",
+      "type": "data.load",
+      "params": {},
+      "inputs": []
+    },
+    {
+      "id": "raw",
+      "type": "features.raw_categorical",
+      "params": {},
+      "inputs": [
+        "load"
+      ]
+    },
+    {
+      "id": "out",
+      "type": "submit.rank",
+      "params": {
+        "filename": "submission.csv"
+      },
+      "inputs": [
+        "model"
+      ]
+    },
+    {
+      "id": "static_side",
+      "type": "features.static_side",
+      "params": {},
+      "inputs": [
+        "load"
+      ]
+    },
+    {
+      "id": "model",
+      "type": "model.setwise_rank",
+      "params": {
+        "seed": 0,
+        "train_group": "user_date",
+        "epochs": 20,
+        "patience": 3,
+        "embedding_dim": 16,
+        "d_model": 64,
+        "n_heads": 4,
+        "n_layers": 2,
+        "dropout": 0.1,
+        "lr": 0.001,
+        "weight_decay": 1e-06,
+        "max_set_size": 48,
+        "set_batch_size": 256,
+        "device": "auto",
+        "threads": 4
+      },
+      "inputs": [
+        "raw",
+        "static_side"
+      ]
+    }
+  ],
+  "meta": {
+    "name": "phase2_fm",
+    "hypothesis_id": "replace_fm_with_setwise_rank",
+    "parent": "add_static_side_features_to_fm",
+    "expected_delta": 0.012
+  }
+}

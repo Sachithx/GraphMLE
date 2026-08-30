@@ -1,0 +1,64 @@
+--- incumbent/graph.json
++++ candidate/graph.json
+@@ -1,8 +1,9 @@
+ {
+   "meta": {
+-    "hypothesis_id": "seed_feature_aware_fm_rank_blend",
++    "expected_delta": 0.0,
++    "hypothesis_id": "repair_multitask_auxiliary_targets",
+     "name": "pipeline_seed_final03",
+-    "parent": "final_02",
++    "parent": "replace_fm_with_multitask_auxiliary_model",
+     "validation_evidence": {
+       "fm_weight": 0.65,
+       "previous_best_primary": 0.601468756,
+@@ -34,18 +35,6 @@
+         "smoothing": 20
+       },
+       "type": "features.item_popularity"
+-    },
+-    {
+-      "id": "fm",
+-      "inputs": [
+-        "raw",
+-        "pop"
+-      ],
+-      "params": {
+-        "numeric_bins": 32,
+-        "seed": 0
+-      },
+-      "type": "model.fm_baseline"
+     },
+     {
+       "id": "ranker",
+@@ -85,6 +74,30 @@
+         "filename": "submission.csv"
+       },
+       "type": "submit.rank"
++    },
++    {
++      "id": "fm",
++      "inputs": [
++        "raw",
++        "pop"
++      ],
++      "params": {
++        "auxiliary_targets": [
++          "click"
++        ],
++        "batch_size": 8192,
++        "device": "auto",
++        "dropout": 0.1,
++        "embedding_dim": 16,
++        "epochs": 3,
++        "hidden_dim": 64,
++        "lr": 0.001,
++        "prediction_batch_size": 65536,
++        "seed": 0,
++        "threads": 4,
++        "weight_decay": 1e-06
++      },
++      "type": "model.torch_multitask"
+     }
+   ]
+ }

@@ -1,0 +1,29 @@
+{
+  "71656da975b49d7c76c72954256a8e241a65185824a933a850d9abdf4253a24b": {
+    "load": {
+      "removal_cost": 0.0,
+      "score_without": 0.6026888178063663,
+      "status": "not_ablatable:ValueError"
+    },
+    "model": {
+      "removal_cost": 0.1190175549255087,
+      "score_without": 0.4836712628808576,
+      "status": "scored"
+    },
+    "out": {
+      "removal_cost": 0.0,
+      "score_without": 0.6026888178063663,
+      "status": "scored"
+    },
+    "raw": {
+      "removal_cost": 0.07258068386271121,
+      "score_without": 0.5301081339436551,
+      "status": "scored"
+    },
+    "static_side": {
+      "removal_cost": 0.001077071781072747,
+      "score_without": 0.6016117460252935,
+      "status": "scored"
+    }
+  }
+}

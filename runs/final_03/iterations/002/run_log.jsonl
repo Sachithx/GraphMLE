@@ -1,0 +1,1 @@
+{"details": {"invalid": ["comment", "follow", "forward", "hate", "like"]}, "event": "leakage_rejection", "layer": "static", "node_id": "auxiliary_targets", "reason": "unsupported auxiliary targets: ['comment', 'follow', 'forward', 'hate', 'like']", "timestamp": "2026-08-29T09:29:40.287787+00:00"}

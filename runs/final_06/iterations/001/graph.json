@@ -1,0 +1,67 @@
+{
+  "nodes": [
+    {
+      "id": "load",
+      "type": "data.load",
+      "params": {},
+      "inputs": []
+    },
+    {
+      "id": "raw",
+      "type": "features.raw_categorical",
+      "params": {},
+      "inputs": [
+        "load"
+      ]
+    },
+    {
+      "id": "model",
+      "type": "model.fm_baseline",
+      "params": {
+        "seed": 0
+      },
+      "inputs": [
+        "raw",
+        "static_side",
+        "user_history"
+      ]
+    },
+    {
+      "id": "out",
+      "type": "submit.rank",
+      "params": {
+        "filename": "submission.csv"
+      },
+      "inputs": [
+        "model"
+      ]
+    },
+    {
+      "id": "static_side",
+      "type": "features.static_side",
+      "params": {},
+      "inputs": [
+        "load"
+      ]
+    },
+    {
+      "id": "user_history",
+      "type": "features.user_history",
+      "params": {
+        "windows": [
+          1,
+          7
+        ]
+      },
+      "inputs": [
+        "load"
+      ]
+    }
+  ],
+  "meta": {
+    "name": "phase2_fm",
+    "hypothesis_id": "add_strict_user_history_to_fm",
+    "parent": "add_static_side_features_to_fm",
+    "expected_delta": 0.003
+  }
+}

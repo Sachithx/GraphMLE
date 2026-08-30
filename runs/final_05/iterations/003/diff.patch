@@ -1,0 +1,64 @@
+--- incumbent/graph.json
++++ candidate/graph.json
+@@ -1,9 +1,9 @@
+ {
+   "meta": {
+-    "expected_delta": 0.006,
+-    "hypothesis_id": "add_static_side_features_to_fm",
++    "expected_delta": 0.012,
++    "hypothesis_id": "replace_fm_with_multitask_auxiliary_learning",
+     "name": "phase2_fm",
+-    "parent": "handwritten_fm"
++    "parent": "add_static_side_features_to_fm"
+   },
+   "nodes": [
+     {
+@@ -19,17 +19,6 @@
+       ],
+       "params": {},
+       "type": "features.raw_categorical"
+-    },
+-    {
+-      "id": "model",
+-      "inputs": [
+-        "raw",
+-        "static_side"
+-      ],
+-      "params": {
+-        "seed": 0
+-      },
+-      "type": "model.fm_baseline"
+     },
+     {
+       "id": "out",
+@@ -48,6 +37,30 @@
+       ],
+       "params": {},
+       "type": "features.static_side"
++    },
++    {
++      "id": "model",
++      "inputs": [
++        "raw",
++        "static_side"
++      ],
++      "params": {
++        "auxiliary_targets": [
++          "is_click",
++          "is_like",
++          "is_follow",
++          "is_comment",
++          "is_forward"
++        ],
++        "auxiliary_weight": 0.3,
++        "embedding_dim": 16,
++        "epochs": 5,
++        "hidden_dim": 64,
++        "lr": 0.001,
++        "patience": 3,
++        "seed": 0
++      },
++      "type": "model.torch_multitask"
+     }
+   ]
+ }
