@@ -29,3 +29,4 @@ runs/*/generated_features/
 # The scored run's designated final submission is a deliverable and is kept.
 !runs/final_06/best/submission.csv
 !runs/final_04/best/submission.csv
+techjam2026_track2_deliverables.zip
