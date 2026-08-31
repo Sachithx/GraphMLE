@@ -112,13 +112,13 @@ def read_run(run_id: str) -> dict:
 # Figure 1 — search trajectory, before and after the proposer correction
 # =========================================================================
 def figure_trajectory():
-    runs = [read_run(r) for r in ("final_04", "final_05", "final_06")]
+    runs = [read_run(r) for r in ("final_05", "final_06", "final_07")]
     labels = {
-        "final_04": "final_04  (from baseline graph)",
-        "final_05": "final_05  (original proposer)",
-        "final_06": "final_06  (corrected proposer)",
+        "final_05": "final_05  (substitutive proposals)",
+        "final_06": "final_06  (additive proposals)",
+        "final_07": "final_07  (seed bagging reachable)",
     }
-    colours = {"final_04": MUTED, "final_05": WARM, "final_06": ACCEPT}
+    colours = {"final_05": WARM, "final_06": MUTED, "final_07": ACCEPT}
 
     fig, (hi, lo) = plt.subplots(
         2, 1, figsize=(7.0, 4.6), sharex=True,
@@ -135,10 +135,10 @@ def figure_trajectory():
 
     # Reference level, labelled in clear space below the line at the right.
     hi.axhline(BASELINE, color=INK, lw=1.0, ls=(0, (4, 3)), zorder=2)
-    hi.annotate("official FM baseline  0.601469", xy=(2.35, BASELINE),
+    hi.annotate("official FM baseline  0.601469", xy=(2.15, BASELINE),
                 xytext=(0, -11), textcoords="offset points", fontsize=7.8, color=INK)
 
-    hi.set_ylim(0.5952, 0.6042)
+    hi.set_ylim(0.5952, 0.6066)
     lo.set_ylim(0.505, 0.556)
     lo.set_yticks([0.51, 0.53, 0.55])
 
@@ -162,21 +162,22 @@ def figure_trajectory():
     lo.set_xticks(range(0, 5))
 
     # Direct labels, placed in empty regions rather than on the curves.
-    hi.annotate("final_06  (corrected proposer)\nnew best  0.603138", xy=(0.42, 0.60405),
+    hi.annotate("final_07  (seed bagging reachable)\nnew best  0.605150", xy=(2.05, 0.60615),
                 ha="left", va="top", fontsize=8.2, color=ACCEPT, weight="semibold",
                 linespacing=1.5)
-    hi.annotate(labels["final_04"], xy=(2.55, 0.5988), fontsize=8, color=MUTED)
+    hi.annotate(labels["final_06"], xy=(2.4, 0.5992), fontsize=8, color=MUTED)
     lo.annotate(labels["final_05"], xy=(0.12, 0.5285), fontsize=8,
                 color=WARM, weight="semibold")
 
     hi.set_title("Search trajectory: proposal quality before and after a logged failure mode was corrected",
                  loc="left", pad=9)
     fig.text(0.005, -0.055,
-             "Both later runs start from the same converged graph (0.602689). The per-iteration logs made the "
-             "failure mode explicit: every\nfinal_05 proposal replaced the incumbent model outright rather than "
-             "building on it. Rewriting the proposer's search-strategy\nguidance between runs made all four "
-             "subsequent proposals additive and produced a new best of 0.603138 — +0.001669 over\nthe official "
-             "baseline, reached in four iterations with zero manual interventions inside any scored run.",
+             "Each run seeds from its predecessor's converged graph. The per-iteration logs made the first failure "
+             "mode explicit: every\nfinal_05 proposal replaced the incumbent model outright and lost. Additive "
+             "search guidance fixed that in final_06. final_07 then\nclosed a representational gap — seed bagging "
+             "needs three coordinated edits, and a one-patch action space could not express\nit — after which the "
+             "agent used it on its first iteration, reaching 0.605150, +0.003682 over the official baseline. No "
+             "scored run\nhad any manual intervention.",
              fontsize=7.6, color=MUTED, ha="left", va="top")
 
     for ext in ("pdf", "png"):
@@ -189,7 +190,7 @@ def figure_trajectory():
 # Figure 2 — which node carries the score
 # =========================================================================
 def figure_ablation():
-    adir = ROOT / "runs" / "final_06" / "ablations"
+    adir = ROOT / "runs" / "final_07" / "ablations"
     cache = {}
     for sub in sorted(adir.glob("*/")):
         for nd in sorted(sub.glob("*/")):
@@ -239,14 +240,14 @@ def figure_ablation():
 # Figure 3 — resource envelope
 # =========================================================================
 def figure_resources():
-    ids = ["final_03", "final_04", "final_05", "final_06"]
+    ids = ["final_04", "final_05", "final_06", "final_07"]
     runs = [(r, read_summary(r)) for r in ids]
     runs = [(r, s) for r, s in runs if s]
 
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(7.4, 2.5))
     x = np.arange(len(runs))
     names = [r.replace("final_", "run ") for r, _ in runs]
-    cols = [ACCEPT if r == "final_06" else MUTED for r, _ in runs]
+    cols = [ACCEPT if r == "final_07" else MUTED for r, _ in runs]
 
     tok = [(s["tokens"]["in"] + s["tokens"]["out"]) / 1000 for _, s in runs]
     ax1.bar(x, tok, width=0.6, color=cols, zorder=3)
@@ -289,9 +290,10 @@ def figure_resources():
     fig.suptitle("Resource envelope per scored run", x=0.005, ha="left", y=1.04,
                  fontsize=9.5, weight="semibold")
     fig.text(0.005, -0.16,
-             "Every run converged on the organisers' rule long before either ceiling bound it. The scored run "
-             "(run 06, highlighted) used\n19.2k tokens, 0.96 h and 4 of 50 iterations, and its converged graph needs "
-             "no GPU: the model is a NumPy factorisation machine.",
+             "Earlier runs all converged on the organisers' rule long before either ceiling bound them. The scored "
+             "run (run 07, highlighted)\nis the first to be stopped by the six-hour ceiling instead, because bagging "
+             "five factorisation machines makes each evaluation\nabout five times more expensive. It still needs no "
+             "GPU: the model is a NumPy factorisation machine.",
              fontsize=7.6, color=MUTED, ha="left", va="top")
     fig.tight_layout()
     for ext in ("pdf", "png"):
