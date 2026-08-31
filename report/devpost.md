@@ -1,4 +1,4 @@
-# Devpost submission — Track 2: Autonomous ML Research Agent
+# GraphMLE: Typed-Graph Autonomous ML Research Agent
 
 ## Inspiration
 
@@ -17,7 +17,7 @@ to verify". Everything else followed from that.
 
 The agent improves a recommender pipeline for KuaiRand-Pure, ranking each user's
 logged impressions by whether they will be long-viewed. It reproduces the
-official Factorisation Machine baseline exactly, then iterates on it without
+official Factorization Machine baseline exactly, then iterates on it without
 supervision: it ablates its own pipeline to find the load-bearing component,
 proposes a schema-constrained change targeting it, validates and executes that
 change in a sandbox, tests the result for significance, and either keeps or
@@ -35,10 +35,10 @@ Scored quantity per the judging formula, `mean over m of delta(m)`: **+0.003600*
 which clears the baseline's own 2-sigma acceptance threshold (0.0016) by 2.25x.
 
 The run used **four iterations** of the fifty-iteration cap, **32,829 LLM
-tokens**, **no GPU** — the converged model is a NumPy factorisation machine — and,
+tokens**, **no GPU** — the converged model is a NumPy factorization machine — and,
 the number I care about most, **zero manual interventions**. It is the first run
 stopped by the six-hour wall-clock ceiling rather than by the convergence rule,
-because bagging five factorisation machines makes each evaluation about five
+because bagging five factorization machines makes each evaluation about five
 times more expensive.
 
 ## How I built it
@@ -69,7 +69,7 @@ and temporal lineage and refuses any feature deriving from a forbidden column at
 the same row. An empirical tripwire flags any validation primary above 0.80,
 since perfect ranking on this task reaches only 0.8645. Prior-date aggregates of
 those same signals remain legal, and multi-task models reach them through a
-separately checked auxiliary-label path. The randomised-exposure log overlaps the
+separately checked auxiliary-label path. The randomized-exposure log overlaps the
 evaluation window, so anything derived from it must prove its source rows end on
 or before the training cutoff.
 
@@ -80,7 +80,7 @@ deviation is 0.0008. Acceptance requires beating the incumbent by more than 2σ
 leaderboard and protects the hidden-test score, which is what actually ranks.
 
 **Ablation as the targeting mechanism.** Before each proposal round the harness
-neutralises one node at a time and re-scores. Removing the model costs 0.1190 and
+neutralizes one node at a time and re-scores. Removing the model costs 0.1190 and
 removing the raw categorical bundle costs 0.0726, while the side-feature bundle
 contributes 0.0011. That table goes to the proposer as evidence, which is what
 turns "the agent tried things" into "the agent chose a target and can say why".
@@ -106,24 +106,24 @@ stopped after three to five iterations having used under a sixth of the
 wall-clock ceiling. ε = 0.002 is 2.5σ of the baseline's seed noise, but the
 genuine per-iteration gains available here are about 0.001 — the same order. An
 agent making real progress trips the convergence test before those gains
-compound. Recognising this as a property of the task rather than a bug in the
+compound. Recognizing this as a property of the task rather than a bug in the
 search changed how I read every subsequent run. It only stopped binding once the
-graph became expensive enough to matter: the scored run bags five factorisation
+graph became expensive enough to matter: the scored run bags five factorization
 machines per evaluation and was finally halted by the six-hour ceiling instead.
 
 **A proposer that only knew how to replace things.** In one run all four
 proposals swapped the incumbent model wholesale — LambdaRank, a setwise
 transformer, multi-task, DeepFM — and all four lost, the worst by 0.089. The
 per-iteration logs made the pattern unmissable. The proposer's own guidance was
-the cause: it told the agent to prioritise large architectural moves, and
+the cause: it told the agent to prioritize large architectural moves, and
 mentioned ensembling only in a buried clause. Rewriting that guidance between
 runs, using the agent's own measured history as the evidence, made every
 subsequent proposal additive and produced the scored result. The before-and-after
 is Figure 1 in the report.
 
-**Assuming a negative result generalises.** I tested the side-feature bundle
+**Assuming a negative result generalizes.** I tested the side-feature bundle
 against LightGBM, measured +0.000084, and concluded the features were dead. The
-agent later paired the same bundle with the Factorisation Machine and gained
+agent later paired the same bundle with the Factorization Machine and gained
 +0.001220. The lesson is now encoded in the proposer's guidance: a feature set
 that does not help one model family can still help another.
 
@@ -132,7 +132,7 @@ has a real discontinuity at eighteen seconds — it behaves as
 `play_time >= min(duration, 18s)`, reproducing the label for 97.81% of training
 rows with a sharp maximum exactly there. Encoding that structure explicitly still
 lost 0.000634, on 3 of 3 seeds. It turned out to be an instance of a general
-property I then measured: adding a feature bundle to a factorisation machine does
+property I then measured: adding a feature bundle to a factorization machine does
 *additive damage*, because every extra field enters every pairwise interaction and
 dilutes the informative ones. Stacking three engineered affinity bundles cost
 0.001954, against 0.001960 predicted by summing their individual costs — the
@@ -167,17 +167,17 @@ better estimator of the ideas it already has.
 - **APIs:** OpenAI Responses API with structured outputs — `gpt-5.6-terra` for
   hypothesis proposal, `gpt-5.6-luna` for error repair
 - **Dataset:** KuaiRand-Pure (27K users × 7.6K items, 1.4M interactions), with the
-  organisers' fixed date-based splits — train 1,141,112 / validation 124,909 /
+  organizers' fixed date-based splits — train 1,141,112 / validation 124,909 /
   test 170,588 rows
 - **Assets:** the official KuaiRand starter kit. `evaluate.py`, `data.py`,
   `baseline.py` and `submit.py` are imported unmodified, so scoring and
-  submission validation run through the organisers' own code rather than a
+  submission validation run through the organizers' own code rather than a
   reimplementation
 - **Development tools:** VS Code, tmux, git; runs executed unattended on a Linux
   host with 2× RTX 6000 Ada. The converged pipeline reports **0 GPU-hours**, and
   that is a result rather than an omission: twelve GPU model configurations were
   trained and evaluated — DeepFM, multi-task learning, and a SetRank-style setwise
-  transformer — and every one lost to the CPU factorisation machine. The best of
+  transformer — and every one lost to the CPU factorization machine. The best of
   them scored 0.599274 against the FM baseline's 0.601469. At 1.4M interactions
   with this signal-to-noise ratio, the FM's inductive bias wins, so the honest
   submission is the cheap one.
@@ -185,7 +185,7 @@ better estimator of the ideas it already has.
 ## Try it
 
 ```bash
-.venv-phase5/bin/python -m pytest -q                          # 65 tests
+.venv-phase5/bin/python -m pytest -q                          # 67 tests
 bash scripts/run_scored.sh final_07 configs/run_final07.yaml 1
 ```
 
