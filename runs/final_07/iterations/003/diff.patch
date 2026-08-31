@@ -1,0 +1,40 @@
+--- incumbent/graph.json
++++ candidate/graph.json
+@@ -1,9 +1,9 @@
+ {
+   "meta": {
+-    "expected_delta": 0.0006,
+-    "hypothesis_id": "seed_bag_incumbent_fm",
++    "expected_delta": 0.0003,
++    "hypothesis_id": "add_pairwise_fm_to_seed_bag",
+     "name": "phase2_fm",
+-    "parent": "add_author_affinity_to_fm"
++    "parent": "seed_bag_incumbent_fm"
+   },
+   "nodes": [
+     {
+@@ -116,10 +116,23 @@
+         "model_s1",
+         "model_s2",
+         "model_s3",
+-        "model_s4"
++        "model_s4",
++        "model_pairwise"
+       ],
+       "params": {},
+       "type": "ensemble.seed_bag"
++    },
++    {
++      "id": "model_pairwise",
++      "inputs": [
++        "raw",
++        "static_side",
++        "author_affinity"
++      ],
++      "params": {
++        "seed": 5
++      },
++      "type": "model.fm_pairwise"
+     }
+   ]
+ }

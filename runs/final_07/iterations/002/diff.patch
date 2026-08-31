@@ -1,0 +1,45 @@
+--- incumbent/graph.json
++++ candidate/graph.json
+@@ -1,9 +1,9 @@
+ {
+   "meta": {
+-    "expected_delta": 0.0006,
+-    "hypothesis_id": "seed_bag_incumbent_fm",
++    "expected_delta": 0.0001,
++    "hypothesis_id": "repair_timeout_reduce_ranker_estimators_v2",
+     "name": "phase2_fm",
+-    "parent": "add_author_affinity_to_fm"
++    "parent": "repair_timeout_reduce_ranker_estimators"
+   },
+   "nodes": [
+     {
+@@ -116,10 +116,28 @@
+         "model_s1",
+         "model_s2",
+         "model_s3",
+-        "model_s4"
++        "model_s4",
++        "ranker_raw_complement"
+       ],
+       "params": {},
+       "type": "ensemble.seed_bag"
++    },
++    {
++      "id": "ranker_raw_complement",
++      "inputs": [
++        "raw",
++        "static_side",
++        "author_affinity"
++      ],
++      "params": {
++        "group_by": "user",
++        "lr": 0.05,
++        "n_estimators": 20,
++        "num_leaves": 31,
++        "objective": "lambdarank",
++        "seed": 0
++      },
++      "type": "model.lightgbm_rank"
+     }
+   ]
+ }

@@ -1,0 +1,90 @@
+--- incumbent/graph.json
++++ candidate/graph.json
+@@ -1,9 +1,9 @@
+ {
+   "meta": {
+     "expected_delta": 0.0006,
+-    "hypothesis_id": "add_author_affinity_to_fm",
++    "hypothesis_id": "seed_bag_incumbent_fm",
+     "name": "phase2_fm",
+-    "parent": "add_static_side_features_to_fm"
++    "parent": "add_author_affinity_to_fm"
+   },
+   "nodes": [
+     {
+@@ -35,7 +35,7 @@
+     {
+       "id": "out",
+       "inputs": [
+-        "model"
++        "model_bag"
+       ],
+       "params": {
+         "filename": "submission.csv"
+@@ -60,6 +60,66 @@
+         "smoothing": 20
+       },
+       "type": "features.user_attribute_affinity"
++    },
++    {
++      "id": "model_s1",
++      "inputs": [
++        "raw",
++        "static_side",
++        "author_affinity"
++      ],
++      "params": {
++        "seed": 1
++      },
++      "type": "model.fm_baseline"
++    },
++    {
++      "id": "model_s2",
++      "inputs": [
++        "raw",
++        "static_side",
++        "author_affinity"
++      ],
++      "params": {
++        "seed": 2
++      },
++      "type": "model.fm_baseline"
++    },
++    {
++      "id": "model_s3",
++      "inputs": [
++        "raw",
++        "static_side",
++        "author_affinity"
++      ],
++      "params": {
++        "seed": 3
++      },
++      "type": "model.fm_baseline"
++    },
++    {
++      "id": "model_s4",
++      "inputs": [
++        "raw",
++        "static_side",
++        "author_affinity"
++      ],
++      "params": {
++        "seed": 4
++      },
++      "type": "model.fm_baseline"
++    },
++    {
++      "id": "model_bag",
++      "inputs": [
++        "model",
++        "model_s1",
++        "model_s2",
++        "model_s3",
++        "model_s4"
++      ],
++      "params": {},
++      "type": "ensemble.seed_bag"
+     }
+   ]
+ }

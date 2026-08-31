@@ -1,0 +1,138 @@
+{
+  "nodes": [
+    {
+      "id": "load",
+      "type": "data.load",
+      "params": {},
+      "inputs": []
+    },
+    {
+      "id": "raw",
+      "type": "features.raw_categorical",
+      "params": {},
+      "inputs": [
+        "load"
+      ]
+    },
+    {
+      "id": "model",
+      "type": "model.fm_baseline",
+      "params": {
+        "seed": 0
+      },
+      "inputs": [
+        "raw",
+        "static_side",
+        "author_affinity"
+      ]
+    },
+    {
+      "id": "out",
+      "type": "submit.rank",
+      "params": {
+        "filename": "submission.csv"
+      },
+      "inputs": [
+        "model_bag"
+      ]
+    },
+    {
+      "id": "static_side",
+      "type": "features.static_side",
+      "params": {},
+      "inputs": [
+        "load"
+      ]
+    },
+    {
+      "id": "author_affinity",
+      "type": "features.user_attribute_affinity",
+      "params": {
+        "attribute": "author_id",
+        "smoothing": 20
+      },
+      "inputs": [
+        "load"
+      ]
+    },
+    {
+      "id": "model_s1",
+      "type": "model.fm_baseline",
+      "params": {
+        "seed": 1
+      },
+      "inputs": [
+        "raw",
+        "static_side",
+        "author_affinity"
+      ]
+    },
+    {
+      "id": "model_s2",
+      "type": "model.fm_baseline",
+      "params": {
+        "seed": 2
+      },
+      "inputs": [
+        "raw",
+        "static_side",
+        "author_affinity"
+      ]
+    },
+    {
+      "id": "model_s3",
+      "type": "model.fm_baseline",
+      "params": {
+        "seed": 3
+      },
+      "inputs": [
+        "raw",
+        "static_side",
+        "author_affinity"
+      ]
+    },
+    {
+      "id": "model_s4",
+      "type": "model.fm_baseline",
+      "params": {
+        "seed": 4
+      },
+      "inputs": [
+        "raw",
+        "static_side",
+        "author_affinity"
+      ]
+    },
+    {
+      "id": "model_bag",
+      "type": "ensemble.seed_bag",
+      "params": {},
+      "inputs": [
+        "model",
+        "model_s1",
+        "model_s2",
+        "model_s3",
+        "model_s4",
+        "model_pairwise"
+      ]
+    },
+    {
+      "id": "model_pairwise",
+      "type": "model.fm_pairwise",
+      "params": {
+        "seed": 5
+      },
+      "inputs": [
+        "raw",
+        "static_side",
+        "author_affinity"
+      ]
+    }
+  ],
+  "meta": {
+    "name": "phase2_fm",
+    "hypothesis_id": "add_pairwise_fm_to_seed_bag",
+    "parent": "seed_bag_incumbent_fm",
+    "expected_delta": 0.0003
+  }
+}

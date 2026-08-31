@@ -1,0 +1,91 @@
+{
+  "3e5a3254c851b4d738dc35ffd5e1bb113d7b1ea8ad5fcdf72fce0b2478b4b393": {
+    "author_affinity": {
+      "removal_cost": 0.001128530832637753,
+      "score_without": 0.6040219324714252,
+      "status": "scored"
+    },
+    "load": {
+      "removal_cost": 0.0,
+      "score_without": 0.605150463304063,
+      "status": "not_ablatable:ValueError"
+    },
+    "model": {
+      "removal_cost": 0.0004510959360712885,
+      "score_without": 0.6046993673679917,
+      "status": "scored"
+    },
+    "model_bag": {
+      "removal_cost": 0.0,
+      "score_without": 0.605150463304063,
+      "status": "not_ablatable:GraphValidationError"
+    },
+    "model_s1": {
+      "removal_cost": 0.00068795979651326,
+      "score_without": 0.6044625035075497,
+      "status": "scored"
+    },
+    "model_s2": {
+      "removal_cost": 0.0002786304177735399,
+      "score_without": 0.6048718328862894,
+      "status": "scored"
+    },
+    "model_s3": {
+      "removal_cost": 0.000628237209567506,
+      "score_without": 0.6045222260944955,
+      "status": "scored"
+    },
+    "model_s4": {
+      "removal_cost": 0.0005028946361060882,
+      "score_without": 0.6046475686679569,
+      "status": "scored"
+    },
+    "out": {
+      "removal_cost": 0.0,
+      "score_without": 0.605150463304063,
+      "status": "scored"
+    },
+    "raw": {
+      "removal_cost": 0.07263142671524836,
+      "score_without": 0.5325190365888146,
+      "status": "scored"
+    },
+    "static_side": {
+      "removal_cost": 0.0019491586757458546,
+      "score_without": 0.6032013046283171,
+      "status": "scored"
+    }
+  },
+  "81c3fcd8c810ef7115824c5f00220995e29d363513eca382a39532fbaef7f2af": {
+    "author_affinity": {
+      "removal_cost": 0.00042179930213792627,
+      "score_without": 0.6027157528731151,
+      "status": "scored"
+    },
+    "load": {
+      "removal_cost": 0.0,
+      "score_without": 0.603137552175253,
+      "status": "not_ablatable:ValueError"
+    },
+    "model": {
+      "removal_cost": 0.1194662892943954,
+      "score_without": 0.4836712628808576,
+      "status": "scored"
+    },
+    "out": {
+      "removal_cost": 0.0,
+      "score_without": 0.603137552175253,
+      "status": "scored"
+    },
+    "raw": {
+      "removal_cost": 0.07300183626150991,
+      "score_without": 0.5301357159137431,
+      "status": "scored"
+    },
+    "static_side": {
+      "removal_cost": 0.0008049301668631159,
+      "score_without": 0.6023326220083899,
+      "status": "scored"
+    }
+  }
+}

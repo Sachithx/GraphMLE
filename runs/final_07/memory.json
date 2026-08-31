@@ -1,0 +1,32 @@
+{
+  "outcomes": [
+    {
+      "hypothesis_id": "seed_bag_incumbent_fm",
+      "accepted": true,
+      "target_node": "model",
+      "delta": 0.002012911128809969,
+      "reason": "delta_above_two_sigma"
+    },
+    {
+      "hypothesis_id": "add_lambdarank_raw_complement_to_bag",
+      "accepted": false,
+      "target_node": "raw",
+      "delta": -0.00024410095381632857,
+      "reason": "not_significant"
+    },
+    {
+      "hypothesis_id": "add_pairwise_fm_to_seed_bag",
+      "accepted": false,
+      "target_node": "raw",
+      "delta": -0.0002620607741874448,
+      "reason": "not_significant"
+    },
+    {
+      "hypothesis_id": "add_decayed_author_affinity_to_fm_bag",
+      "accepted": false,
+      "target_node": "raw",
+      "delta": -0.000989420364104987,
+      "reason": "not_significant"
+    }
+  ]
+}

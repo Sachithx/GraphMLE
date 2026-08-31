@@ -1,0 +1,85 @@
+--- incumbent/graph.json
++++ candidate/graph.json
+@@ -1,9 +1,9 @@
+ {
+   "meta": {
+-    "expected_delta": 0.0006,
+-    "hypothesis_id": "seed_bag_incumbent_fm",
++    "expected_delta": 0.00025,
++    "hypothesis_id": "add_decayed_author_affinity_to_fm_bag",
+     "name": "phase2_fm",
+-    "parent": "add_author_affinity_to_fm"
++    "parent": "seed_bag_incumbent_fm"
+   },
+   "nodes": [
+     {
+@@ -25,7 +25,8 @@
+       "inputs": [
+         "raw",
+         "static_side",
+-        "author_affinity"
++        "author_affinity",
++        "decayed_author_affinity"
+       ],
+       "params": {
+         "seed": 0
+@@ -66,7 +67,8 @@
+       "inputs": [
+         "raw",
+         "static_side",
+-        "author_affinity"
++        "author_affinity",
++        "decayed_author_affinity"
+       ],
+       "params": {
+         "seed": 1
+@@ -78,7 +80,8 @@
+       "inputs": [
+         "raw",
+         "static_side",
+-        "author_affinity"
++        "author_affinity",
++        "decayed_author_affinity"
+       ],
+       "params": {
+         "seed": 2
+@@ -90,7 +93,8 @@
+       "inputs": [
+         "raw",
+         "static_side",
+-        "author_affinity"
++        "author_affinity",
++        "decayed_author_affinity"
+       ],
+       "params": {
+         "seed": 3
+@@ -102,7 +106,8 @@
+       "inputs": [
+         "raw",
+         "static_side",
+-        "author_affinity"
++        "author_affinity",
++        "decayed_author_affinity"
+       ],
+       "params": {
+         "seed": 4
+@@ -120,6 +125,19 @@
+       ],
+       "params": {},
+       "type": "ensemble.seed_bag"
++    },
++    {
++      "id": "decayed_author_affinity",
++      "inputs": [
++        "load"
++      ],
++      "params": {
++        "alpha": 20.0,
++        "attribute": "author_id",
++        "centered": true,
++        "half_life_days": 7.0
++      },
++      "type": "features.decayed_affinity"
+     }
+   ]
+ }
