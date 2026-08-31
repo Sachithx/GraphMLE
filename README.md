@@ -1,4 +1,4 @@
-# TechJam 2026 — Autonomous ML Research Agent (Track 2, KuaiRand-Pure)
+# GraphMLE: Typed-Graph Autonomous ML Research Agent
 
 A typed operator-graph agent that reproduces the official KuaiRand-Pure baseline
 exactly, then improves on it autonomously. Every scored run below executed
