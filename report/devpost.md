@@ -174,14 +174,20 @@ better estimator of the ideas it already has.
   submission validation run through the organisers' own code rather than a
   reimplementation
 - **Development tools:** VS Code, tmux, git; runs executed unattended on a Linux
-  host with 2× RTX 6000 Ada (the converged pipeline needs no GPU)
+  host with 2× RTX 6000 Ada. The converged pipeline reports **0 GPU-hours**, and
+  that is a result rather than an omission: twelve GPU model configurations were
+  trained and evaluated — DeepFM, multi-task learning, and a SetRank-style setwise
+  transformer — and every one lost to the CPU factorisation machine. The best of
+  them scored 0.599274 against the FM baseline's 0.601469. At 1.4M interactions
+  with this signal-to-noise ratio, the FM's inductive bias wins, so the honest
+  submission is the cheap one.
 
 ## Try it
 
 ```bash
-.venv-phase5/bin/python -m pytest -q                          # 60 tests
-bash scripts/run_scored.sh final_06 configs/run_final06.yaml 1
+.venv-phase5/bin/python -m pytest -q                          # 65 tests
+bash scripts/run_scored.sh final_07 configs/run_final07.yaml 1
 ```
 
-Full reproduction steps, the per-iteration logs for all four scored runs, and an
+Full reproduction steps, the per-iteration logs for every scored run, and an
 honest account of the limitations are in the repository README.

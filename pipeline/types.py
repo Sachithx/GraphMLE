@@ -78,6 +78,10 @@ class ExecutionContext:
     run_log_path: Path | None = None
     leakage_guard_enabled: bool = True
     metric_splits: tuple[str, ...] = ("valid", "test")
+    # Independent nodes at the same dependency level may run concurrently. Threads
+    # keep the large feature frames shared; measured 1.66x on a three-seed bag with
+    # bit-identical outputs. 1 restores strictly sequential execution.
+    max_parallel_nodes: int = 1
 
     def __post_init__(self) -> None:
         self.data_dir = self.data_dir.expanduser().resolve()

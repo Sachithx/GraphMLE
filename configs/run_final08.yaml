@@ -1,0 +1,39 @@
+# final_08 - parallel node execution, so the wall-clock ceiling buys more search.
+#
+# final_07 was the first run stopped by the six-hour ceiling rather than by the
+# convergence rule: it bags five factorisation machines per evaluation and trained
+# them one after another on a single core. The replicas are mutually independent,
+# so execute_graph now runs same-level nodes concurrently in threads. Measured
+# end to end on a three-seed bag: 82.8s -> 57.3s, with a hash-identical
+# submission. Threads rather than processes because the feature frames are far
+# too large to pickle into workers, and the starter-kit loader (which mutates
+# sys.modules) is pre-warmed on the main thread before any parallel work.
+#
+# Seeds from final_07's converged graph. Organiser convergence rule and ceilings
+# unchanged; no human edits the graph during the run.
+seed_graph: runs/final_07/best/graph.json
+loop:
+  max_iterations: 50
+  max_wall_clock_s: 21600
+  iteration_timeout_s: 3600
+  memory_limit_mb: 12288
+  convergence_window: 3
+  convergence_delta: 0.002
+  significance_threshold: 0.0016
+  confirm_small_deltas: true
+  inner_refinement_attempts: 4
+  validation_reproposal_attempts: 3
+  repair_attempts: 3
+  max_parallel_nodes: 8
+evaluation:
+  mode: production
+  data_dir: data/kuairand-pure/data
+  starter_kit_dir: data/starter-kit
+  baseline_primary: 0.6014687563529677
+llm:
+  mode: live
+  model: gpt-5.6-terra
+  repair_model: gpt-5.6-luna
+  reasoning_effort: low
+  repair_reasoning_effort: low
+  max_retries: 3

@@ -247,3 +247,125 @@ def test_pairwise_step_increases_the_positive_margin() -> None:
     after = model.logits(x_pos)[0][0] - model.logits(x_neg)[0][0]
 
     assert after > before
+
+
+def test_dependency_levels_group_independent_nodes() -> None:
+    """A seed bag's replicas must land in one level so they can run together."""
+    from pipeline.execute import _dependency_levels
+    from pipeline.graph import OperatorGraph
+    from pipeline.registry import default_registry
+
+    graph = OperatorGraph.from_dict({
+        "nodes": [
+            {"id": "load", "type": "data.load", "params": {}, "inputs": []},
+            {"id": "raw", "type": "features.raw_categorical", "params": {}, "inputs": ["load"]},
+            {"id": "m0", "type": "model.fm_baseline", "params": {"seed": 0}, "inputs": ["raw"]},
+            {"id": "m1", "type": "model.fm_baseline", "params": {"seed": 1}, "inputs": ["raw"]},
+            {"id": "m2", "type": "model.fm_baseline", "params": {"seed": 2}, "inputs": ["raw"]},
+            {"id": "bag", "type": "ensemble.seed_bag", "params": {}, "inputs": ["m0", "m1", "m2"]},
+            {"id": "out", "type": "submit.rank", "params": {}, "inputs": ["bag"]},
+        ],
+        "meta": {"name": "t", "hypothesis_id": "h"},
+    })
+    order = graph.validate(default_registry())
+    levels = _dependency_levels(order)
+
+    ids = [sorted(n.id for n in level) for level in levels]
+    assert ids[0] == ["load"]
+    assert ids[1] == ["raw"]
+    # The three replicas are mutually independent and must share a level.
+    assert ids[2] == ["m0", "m1", "m2"]
+    assert ids[3] == ["bag"]
+    assert ids[4] == ["out"]
+    # Every node appears exactly once, and never before its inputs.
+    seen: set[str] = set()
+    for level in levels:
+        for node in level:
+            assert set(node.inputs) <= seen
+        seen |= {n.id for n in level}
+    assert len(seen) == len(order)
+
+
+def test_parallel_execution_matches_sequential(tmp_path) -> None:
+    """Parallel execution must be a pure speedup: identical scores, same order."""
+    import numpy as np
+    import pandas as pd
+
+    from pipeline.execute import execute_graph
+    from pipeline.graph import OperatorGraph
+    from pipeline.registry import OperatorRegistry, OperatorSpec
+    from pipeline.types import (
+        DataBundle,
+        ExecutionContext,
+        PredictionBundle,
+        ValueType,
+    )
+
+    # execute_graph scores the terminal, so the fixture needs a stand-in evaluator.
+    (tmp_path / "evaluate.py").write_text(
+        "def evaluate(user_ids, labels, scores, k=5):\n"
+        "    return {'GAUC': 0.5, 'nDCG@5': 0.5, 'primary': 0.5}\n"
+    )
+
+    frames = {
+        split: pd.DataFrame({
+            "row_id": np.arange(4, dtype=np.int64),
+            "user_id": ["u0", "u0", "u1", "u1"],
+            "video_id": ["a", "b", "a", "b"],
+            "long_view": [1, 0, 0, 1],
+        })
+        for split in ("train", "valid", "test")
+    }
+    data = DataBundle(frames, {}, tmp_path, tmp_path)
+
+    def load(inputs, params, ctx):
+        return data
+
+    def scorer(inputs, params, ctx):
+        offset = float(params.get("offset", 0.0))
+        return PredictionBundle(
+            f"m{offset}",
+            {s: np.arange(4, dtype=np.float64) + offset for s in frames},
+            data,
+        )
+
+    def combine(inputs, params, ctx):
+        return PredictionBundle(
+            "bag",
+            {s: np.mean([p.scores[s] for p in inputs], axis=0) for s in frames},
+            data,
+        )
+
+    registry = OperatorRegistry()
+    registry.register(OperatorSpec("t.load", (), ValueType.DATA, load))
+    registry.register(OperatorSpec("t.model", (ValueType.DATA,), ValueType.PREDICTIONS, scorer))
+    registry.register(
+        OperatorSpec("t.bag", (ValueType.PREDICTIONS,), ValueType.PREDICTIONS, combine, True)
+    )
+
+    spec = {
+        "nodes": [
+            {"id": "load", "type": "t.load", "params": {}, "inputs": []},
+            {"id": "a", "type": "t.model", "params": {"offset": 1.0}, "inputs": ["load"]},
+            {"id": "b", "type": "t.model", "params": {"offset": 2.0}, "inputs": ["load"]},
+            {"id": "c", "type": "t.model", "params": {"offset": 3.0}, "inputs": ["load"]},
+            {"id": "bag", "type": "t.bag", "params": {}, "inputs": ["a", "b", "c"]},
+        ],
+        "meta": {"name": "t", "hypothesis_id": "h"},
+    }
+
+    def run(workers: int):
+        ctx = ExecutionContext(
+            tmp_path, tmp_path, tmp_path / f"out{workers}",
+            leakage_guard_enabled=False, metric_splits=("valid",),
+            max_parallel_nodes=workers,
+        )
+        return execute_graph(OperatorGraph.from_dict(spec), ctx, registry)
+
+    sequential = run(1)
+    parallel = run(4)
+    assert np.array_equal(
+        sequential.terminal.scores["valid"], parallel.terminal.scores["valid"]
+    )
+    # And the mean of offsets 1, 2, 3 is 2, so the bag is genuinely combining all three.
+    assert np.allclose(parallel.terminal.scores["valid"], np.arange(4) + 2.0)

@@ -5,7 +5,9 @@ import csv
 import json
 import subprocess
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -99,6 +101,38 @@ def _prediction_from_terminal(terminal: Any) -> PredictionBundle | None:
     return None
 
 
+def _dependency_levels(order: tuple[Any, ...]) -> list[list[Any]]:
+    """Group a topological order into levels of mutually independent nodes.
+
+    Nodes in the same level have no path between them, so they may run
+    concurrently. A seed bag puts its replicas in one level, which is where the
+    parallelism actually pays.
+    """
+    depth: dict[str, int] = {}
+    levels: dict[int, list[Any]] = {}
+    for node in order:
+        level = max((depth[i] + 1 for i in node.inputs), default=0)
+        depth[node.id] = level
+        levels.setdefault(level, []).append(node)
+    return [levels[key] for key in sorted(levels)]
+
+
+def _prewarm_shared_state(ctx: ExecutionContext) -> None:
+    """Populate caches whose first population is not thread-safe.
+
+    The starter-kit loader mutates sys.path and sys.modules, and the official
+    evaluator memoises a module load. Racing either from worker threads is
+    unsafe, so both are forced once on the main thread before any parallel work.
+    """
+    from .ops_models import _load_kit_runtime
+
+    try:
+        _load_kit_runtime(ctx)
+    except Exception:
+        # Absent in synthetic fixtures; parallel execution then has nothing to race.
+        pass
+
+
 def execute_graph(
     graph: OperatorGraph,
     ctx: ExecutionContext,
@@ -113,7 +147,10 @@ def execute_graph(
     )
     start = time.monotonic()
     outputs: dict[str, Any] = {}
-    for node in order:
+    guard_lock = threading.Lock()
+    max_workers = max(1, int(getattr(ctx, "max_parallel_nodes", 1)))
+
+    def run_node(node: Any) -> tuple[str, Any]:
         spec = registry[node.type]
         value = spec.function(
             [outputs[input_id] for input_id in node.inputs], dict(node.params), ctx
@@ -124,8 +161,25 @@ def execute_graph(
                 f"operator {node.id} returned {type(value).__name__}, expected {expected.__name__}"
             )
         if leakage_guard is not None and isinstance(value, FeatureBundle):
-            leakage_guard.check_feature_bundle(value, node_id=node.id)
-        outputs[node.id] = value
+            # The guard appends to a shared log, so serialise the check itself.
+            with guard_lock:
+                leakage_guard.check_feature_bundle(value, node_id=node.id)
+        return node.id, value
+
+    if max_workers > 1:
+        _prewarm_shared_state(ctx)
+        for level in _dependency_levels(order):
+            if len(level) == 1:
+                node_id, value = run_node(level[0])
+                outputs[node_id] = value
+                continue
+            with ThreadPoolExecutor(max_workers=min(max_workers, len(level))) as pool:
+                for node_id, value in pool.map(run_node, level):
+                    outputs[node_id] = value
+    else:
+        for node in order:
+            node_id, value = run_node(node)
+            outputs[node_id] = value
     submit_nodes = [node for node in order if node.type.startswith("submit.")]
     if len(submit_nodes) > 1:
         raise ValueError("graph must not contain multiple submission nodes")
@@ -172,6 +226,12 @@ def main() -> None:
         default=("valid", "test"),
         help="labeled splits to score; Phase 5 passes only valid",
     )
+    parser.add_argument(
+        "--max-parallel-nodes",
+        type=int,
+        default=1,
+        help="run mutually independent nodes concurrently; 1 is strictly sequential",
+    )
     args = parser.parse_args()
     result = execute_graph(
         OperatorGraph.from_path(args.graph),
@@ -181,6 +241,7 @@ def main() -> None:
             args.output_dir,
             args.seed,
             metric_splits=tuple(args.metric_splits),
+            max_parallel_nodes=args.max_parallel_nodes,
         ),
     )
     print(json.dumps({"metrics": result.metrics, "wall_clock_s": result.wall_clock_s}, indent=2))
