@@ -27,15 +27,19 @@ reverts it — logging a full record of each iteration.
 
 | metric | agent | official baseline | absolute delta |
 |---|---:|---:|---:|
-| GAUC | 0.669639 | 0.6674 | **+0.002239** |
-| nDCG@5 | 0.536636 | 0.5357 | **+0.000936** |
-| primary | 0.603138 | 0.6016 | **+0.001538** |
+| GAUC | 0.672167 | 0.6674 | **+0.004767** |
+| nDCG@5 | 0.538134 | 0.5357 | **+0.002434** |
+| primary | 0.605150 | 0.6016 | **+0.003550** |
 
-Scored quantity per the judging formula, `mean over m of delta(m)`: **+0.001588**.
+Scored quantity per the judging formula, `mean over m of delta(m)`: **+0.003600**,
+which clears the baseline's own 2-sigma acceptance threshold (0.0016) by 2.25x.
 
-The run converged under the organisers' own rule (ε = 0.002, N = 3) in **four
-iterations**, using **0.96 h of the 6 h ceiling**, **19,211 LLM tokens**, **no
-GPU**, and — the number I care about most — **zero manual interventions**.
+The run used **four iterations** of the fifty-iteration cap, **32,829 LLM
+tokens**, **no GPU** — the converged model is a NumPy factorisation machine — and,
+the number I care about most, **zero manual interventions**. It is the first run
+stopped by the six-hour wall-clock ceiling rather than by the convergence rule,
+because bagging five factorisation machines makes each evaluation about five
+times more expensive.
 
 ## How I built it
 
@@ -76,21 +80,36 @@ deviation is 0.0008. Acceptance requires beating the incumbent by more than 2σ
 leaderboard and protects the hidden-test score, which is what actually ranks.
 
 **Ablation as the targeting mechanism.** Before each proposal round the harness
-neutralises one node at a time and re-scores. On the converged graph, removing
-the model costs 0.1190 and removing the raw categorical bundle costs 0.0726,
-while the side-feature bundle contributes 0.0011. That table goes to the proposer
-as evidence, which is what turns "the agent tried things" into "the agent chose a
-target and can say why".
+neutralises one node at a time and re-scores. Removing the model costs 0.1190 and
+removing the raw categorical bundle costs 0.0726, while the side-feature bundle
+contributes 0.0011. That table goes to the proposer as evidence, which is what
+turns "the agent tried things" into "the agent chose a target and can say why".
+
+**Closing a representational gap, which produced the largest gain.** Offline
+measurement said the biggest available win was seed bagging the incumbent. The
+agent never proposed it across three runs, and the reason turned out not to be
+poor search: it *could not express it*. A bag needs three coordinated edits —
+replicate the model under new seeds, insert the ensemble, rewire the consumers —
+but a hypothesis carries one patch, and every intermediate graph leaves a model
+node whose output reaches no terminal, which validation correctly rejects. The
+move was outside the action space. Adding an atomic `bag_node` patch, which makes
+all three edits indivisible so no invalid intermediate exists, fixed it: the agent
+used it on its very first iteration, chose five seeds where I had hand-tested
+three, and beat my best manual ensemble (0.605150 against 0.604850). Its own
+predicted delta was 0.0006, six times smaller than what it got, so it reached the
+move by reasoning about search strategy rather than by being told the answer.
 
 ## Challenges
 
-**The convergence rule binds before the compute budget does.** Every run stopped
-after three to five iterations, having used under a sixth of the wall-clock
-ceiling. ε = 0.002 is 2.5σ of the baseline's seed noise, but the genuine gains
-available here are about 0.001 — the same order. An agent making real progress
-trips the convergence test before those gains compound. Recognising that this is
-a property of the task rather than a bug in the search changed how I read every
-subsequent run.
+**The convergence rule binds before the compute budget does.** Every early run
+stopped after three to five iterations having used under a sixth of the
+wall-clock ceiling. ε = 0.002 is 2.5σ of the baseline's seed noise, but the
+genuine per-iteration gains available here are about 0.001 — the same order. An
+agent making real progress trips the convergence test before those gains
+compound. Recognising this as a property of the task rather than a bug in the
+search changed how I read every subsequent run. It only stopped binding once the
+graph became expensive enough to matter: the scored run bags five factorisation
+machines per evaluation and was finally halted by the six-hour ceiling instead.
 
 **A proposer that only knew how to replace things.** In one run all four
 proposals swapped the incumbent model wholesale — LambdaRank, a setwise
@@ -105,9 +124,20 @@ is Figure 1 in the report.
 **Assuming a negative result generalises.** I tested the side-feature bundle
 against LightGBM, measured +0.000084, and concluded the features were dead. The
 agent later paired the same bundle with the Factorisation Machine and gained
-+0.001220 — its single best accepted move, and fifteen times what I had measured.
-The lesson is now encoded in the proposer's guidance: a feature set that does not
-help one model family can still help another.
++0.001220. The lesson is now encoded in the proposer's guidance: a feature set
+that does not help one model family can still help another.
+
+**Believing a verified property must be a useful feature.** The `long_view` label
+has a real discontinuity at eighteen seconds — it behaves as
+`play_time >= min(duration, 18s)`, reproducing the label for 97.81% of training
+rows with a sharp maximum exactly there. Encoding that structure explicitly still
+lost 0.000634, on 3 of 3 seeds. It turned out to be an instance of a general
+property I then measured: adding a feature bundle to a factorisation machine does
+*additive damage*, because every extra field enters every pairwise interaction and
+dilutes the informative ones. Stacking three engineered affinity bundles cost
+0.001954, against 0.001960 predicted by summing their individual costs — the
+damages simply add. That result is why the converged graph is small, and it
+refutes the intuition that complementary features accumulate.
 
 ## What I learned
 
@@ -120,10 +150,15 @@ single fact explains why a large block of side features contributes almost
 nothing as main effects, and why the feature that did work — a user-by-author
 historical affinity — was one that varies within a user by construction.
 
-The second lesson is that variance reduction outperformed novelty. Across
-extensive offline experiments the most reliable gain available was not a new
-architecture but averaging several seeds of the incumbent, worth about +0.0012 —
-more than any single architectural change I tested.
+The second lesson is that variance reduction outperformed novelty, and by a wide
+margin. Across roughly twenty offline experiments — a setwise transformer, DeepFM,
+multi-task learning, pairwise fine-tuning, time-decayed affinities, an 18-second
+label-aligned feature family — nothing beat simply averaging several seeds of the
+incumbent. Seed bagging alone accounts for +0.0015 of the final +0.0037, more than
+every architectural change tested put together. The corollary is uncomfortable and
+worth stating: on a benchmark where seed noise and real effects are the same size,
+the highest-value move an autonomous agent can make is often not a new idea but a
+better estimator of the ideas it already has.
 
 ## Built with
 
