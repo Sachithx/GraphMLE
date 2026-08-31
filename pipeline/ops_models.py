@@ -749,3 +749,165 @@ def op_setwise_rank(
 
     scores = {split: predict_split(split) for split in ("train", "valid", "test")}
     return PredictionBundle("setwise_rank", scores, prepared.data)
+
+
+def _sigmoid(z: np.ndarray) -> np.ndarray:
+    return 1.0 / (1.0 + np.exp(-np.clip(z, -60.0, 60.0)))
+
+
+def _fm_pairwise_step(model: Any, x_pos: np.ndarray, x_neg: np.ndarray, lr: float) -> float:
+    """One Adam step on the BPR pairwise loss for same-user candidate pairs.
+
+    The scored metrics only compare items inside one user's impression list, so
+    the quantity worth optimising is the score *difference* between a positive
+    and a negative of the same user, not either absolute score:
+
+        L = log(1 + exp(-(z_pos - z_neg)))
+
+    dL/dz_pos = -sigmoid(-(z_pos - z_neg)), and dL/dz_neg is its negation. The
+    field-gradient bookkeeping below is the same as the kit's pointwise step,
+    applied once per side with opposite signs.
+    """
+    batch = len(x_pos)
+    z_pos, e_pos, s_pos = model.logits(x_pos)
+    z_neg, e_neg, s_neg = model.logits(x_neg)
+    margin = z_pos - z_neg
+    g = (-_sigmoid(-margin) / batch).astype(np.float32)
+
+    grad_v = np.zeros_like(model.V)
+    grad_w = np.zeros_like(model.W)
+    np.add.at(grad_w, x_pos, g[:, None])
+    np.add.at(grad_w, x_neg, -g[:, None])
+    np.add.at(grad_v, x_pos, g[:, None, None] * (s_pos[:, None, :] - e_pos))
+    np.add.at(grad_v, x_neg, -g[:, None, None] * (s_neg[:, None, :] - e_neg))
+    grad_v += model.l2 * model.V
+    grad_w += model.l2 * model.W
+
+    model.t += 1
+    b1, b2, eps = 0.9, 0.999, 1e-8
+    for param, grad, m, v in (
+        (model.V, grad_v, model.mV, model.vV),
+        (model.W, grad_w, model.mW, model.vW),
+    ):
+        m *= b1
+        m += (1 - b1) * grad
+        v *= b2
+        v += (1 - b2) * (grad * grad)
+        param -= lr * (m / (1 - b1 ** model.t)) / (np.sqrt(v / (1 - b2 ** model.t)) + eps)
+    # The bias cancels in a within-user difference, so it is deliberately not updated.
+    return float(np.mean(np.log1p(np.exp(-np.clip(margin, -60.0, 60.0)))))
+
+
+def _same_user_pairs(users: np.ndarray, labels: np.ndarray, rng: np.random.Generator,
+                     pairs_per_user: int) -> tuple[np.ndarray, np.ndarray]:
+    """Sample (positive, negative) row-index pairs drawn from the same user."""
+    order = np.argsort(users, kind="stable")
+    sorted_users = users[order]
+    boundaries = np.flatnonzero(np.r_[True, sorted_users[1:] != sorted_users[:-1]])
+    starts = boundaries
+    ends = np.r_[boundaries[1:], len(sorted_users)]
+    pos_out: list[np.ndarray] = []
+    neg_out: list[np.ndarray] = []
+    for start, end in zip(starts, ends):
+        rows = order[start:end]
+        y = labels[rows]
+        positives = rows[y == 1]
+        negatives = rows[y == 0]
+        if len(positives) == 0 or len(negatives) == 0:
+            continue  # a user with one class carries no ordering information
+        count = min(pairs_per_user, max(len(positives), len(negatives)))
+        pos_out.append(rng.choice(positives, size=count, replace=len(positives) < count))
+        neg_out.append(rng.choice(negatives, size=count, replace=len(negatives) < count))
+    if not pos_out:
+        raise RuntimeError("no user has both a positive and a negative training row")
+    return np.concatenate(pos_out), np.concatenate(neg_out)
+
+
+def op_fm_pairwise(
+    inputs: list[Any], params: dict[str, Any], ctx: ExecutionContext
+) -> PredictionBundle:
+    """Pointwise FM, then a short pairwise fine-tune against the ranking objective.
+
+    This deliberately keeps the representation that already scores well and only
+    nudges it toward the metric's structure. Replacing the FM with a natively
+    listwise model was measured to be far worse; warm-starting from it and
+    fine-tuning is the additive version of the same idea.
+    """
+    bundles = _require_features(inputs)
+    data = bundles[0].data
+    _kit_data, baseline = _load_kit_runtime(ctx)
+    encoded, dimension = _encode_fm_features(
+        bundles, numeric_bins=int(params.get("numeric_bins", 32))
+    )
+    x_train, y_train, _ = encoded["train"]
+    x_valid, y_valid, users_valid = encoded["valid"]
+    seed = int(params.get("seed", ctx.seed))
+    rng = np.random.default_rng(seed)
+
+    model = baseline.FM(
+        dimension,
+        k=int(params.get("k", 16)),
+        lr=float(params.get("lr", 0.001)),
+        l2=float(params.get("l2", 1e-6)),
+        seed=seed,
+    )
+
+    def valid_primary() -> float:
+        return evaluate_official(
+            users_valid, y_valid, model.predict(x_valid),
+            starter_kit_dir=data.starter_kit_dir,
+        )["primary"]
+
+    def snapshot():
+        return (model.V.copy(), model.W.copy(), np.float32(model.b))
+
+    batch_size = int(params.get("batch_size", 8192))
+    best = -np.inf
+    best_state = None
+
+    # Stage 1: the standard pointwise fit.
+    patience = int(params.get("patience", 4))
+    bad = 0
+    for _epoch in range(int(params.get("epochs", 40))):
+        order = rng.permutation(len(y_train))
+        for start in range(0, len(order), batch_size):
+            selection = order[start : start + batch_size]
+            model.step(x_train[selection], y_train[selection])
+        primary = valid_primary()
+        if primary > best + 1e-5:
+            best, bad, best_state = primary, 0, snapshot()
+        else:
+            bad += 1
+            if bad >= patience:
+                break
+    if best_state is None:
+        raise RuntimeError("pointwise FM stage produced no checkpoint")
+    model.V, model.W, model.b = best_state
+
+    # Stage 2: pairwise fine-tune at a lower learning rate, warm-started above.
+    train_users = data.frames["train"]["user_id"].astype(str).to_numpy()
+    pair_lr = float(params.get("pairwise_lr", 0.0002))
+    pairs_per_user = int(params.get("pairs_per_user", 4))
+    pair_patience = int(params.get("pairwise_patience", 2))
+    bad = 0
+    for _epoch in range(int(params.get("pairwise_epochs", 6))):
+        pos_idx, neg_idx = _same_user_pairs(train_users, y_train, rng, pairs_per_user)
+        shuffle = rng.permutation(len(pos_idx))
+        pos_idx, neg_idx = pos_idx[shuffle], neg_idx[shuffle]
+        for start in range(0, len(pos_idx), batch_size):
+            sl = slice(start, start + batch_size)
+            _fm_pairwise_step(model, x_train[pos_idx[sl]], x_train[neg_idx[sl]], pair_lr)
+        primary = valid_primary()
+        if primary > best + 1e-5:
+            best, bad, best_state = primary, 0, snapshot()
+        else:
+            bad += 1
+            if bad >= pair_patience:
+                break
+    model.V, model.W, model.b = best_state
+
+    scores = {
+        split: model.predict(encoded[split][0]).astype(np.float64)
+        for split in ("train", "valid", "test")
+    }
+    return PredictionBundle("fm_pairwise", scores, data)

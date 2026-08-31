@@ -204,3 +204,46 @@ def test_lightgbm_rank_group_by_changes_query_construction(tmp_path) -> None:
 
     assert sorted(user_groups.tolist()) == [2, 3]          # u1:2, u0:3
     assert sorted(user_date_groups.tolist()) == [1, 1, 1, 2]  # split per day
+
+
+def test_pairwise_step_increases_the_positive_margin() -> None:
+    """A BPR step must widen the score gap between a positive and its negative.
+
+    This is the whole point of the fine-tune stage, so it is asserted on the
+    gradient itself rather than inferred from a downstream metric.
+    """
+    import sys
+    import types
+
+    import numpy as np
+
+    from pipeline.ops_models import _fm_pairwise_step
+
+    # Minimal stand-in with the same attributes the kit's FM exposes.
+    class TinyFM:
+        def __init__(self, dim=6, k=3):
+            rng = np.random.default_rng(0)
+            self.V = rng.normal(0, 0.1, (dim, k)).astype(np.float32)
+            self.W = rng.normal(0, 0.1, dim).astype(np.float32)
+            self.b = np.float32(0.0)
+            self.l2 = 0.0
+            self.mV = np.zeros_like(self.V); self.vV = np.zeros_like(self.V)
+            self.mW = np.zeros_like(self.W); self.vW = np.zeros_like(self.W)
+            self.t = 0
+
+        def logits(self, X):
+            E = self.V[X]
+            S = E.sum(1)
+            inter = 0.5 * ((S ** 2).sum(1) - (E ** 2).sum((1, 2)))
+            return self.b + self.W[X].sum(1) + inter, E, S
+
+    model = TinyFM()
+    x_pos = np.array([[0, 1]], dtype=np.int32)
+    x_neg = np.array([[2, 3]], dtype=np.int32)
+
+    before = model.logits(x_pos)[0][0] - model.logits(x_neg)[0][0]
+    for _ in range(30):
+        _fm_pairwise_step(model, x_pos, x_neg, lr=0.05)
+    after = model.logits(x_pos)[0][0] - model.logits(x_neg)[0][0]
+
+    assert after > before

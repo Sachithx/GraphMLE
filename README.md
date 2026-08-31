@@ -6,19 +6,19 @@ unattended, start to finish, with **zero manual interventions**.
 
 ## Result
 
-The scored run is `final_06`. It converged under the organisers' published rule
-(ε = 0.002, N = 3) after four iterations.
+The scored run is `final_07`. It ran to the organisers' six-hour wall-clock
+ceiling with **zero manual interventions**.
 
 | metric | agent | official baseline | absolute delta |
 |---|---:|---:|---:|
-| GAUC | 0.669639 | 0.6674 | **+0.002239** |
-| nDCG@5 | 0.536636 | 0.5357 | **+0.000936** |
-| primary | 0.603138 | 0.6016 | **+0.001538** |
+| GAUC | 0.672167 | 0.6674 | **+0.004767** |
+| nDCG@5 | 0.538134 | 0.5357 | **+0.002434** |
+| primary | 0.605150 | 0.6016 | **+0.003550** |
 
-Per the judging formula, `score_dataset = mean over m of delta(m)` = **+0.001588**.
-
+Per the judging formula, `score_dataset = mean over m of delta(m)` = **+0.003600**,
+which clears the baseline's 2-sigma acceptance threshold (0.0016) by 2.25x.
 Against our own exact seed-0 reproduction of the baseline pipeline
-(0.6014687563529677) the primary delta is **+0.001669**.
+(0.6014687563529677) the primary delta is **+0.003682**.
 
 Read the numbers against the attainable range, not against 1.0: 27.1% of users
 have no positive label and 9.2% are all-positive, so perfect ranking reaches
@@ -29,35 +29,70 @@ about 31% of that range.
 |---|---:|
 | manual interventions | **0** |
 | iterations used | 4 of 50 |
-| agent wall-clock | 0.96 h of the 6 h ceiling |
-| LLM tokens | 17,063 in + 2,148 out = 19,211 |
+| agent wall-clock | 6.14 h (stopped by the wall-clock ceiling) |
+| LLM tokens | 29,878 in + 2,951 out = 32,829 |
 | GPU-hours | 0 — the converged graph is a NumPy factorisation machine |
 
-Submission: `runs/final_06/best/submission.csv`, verified by the starter kit's
+Submission: `runs/final_07/best/submission.csv`, verified by the starter kit's
 unmodified `submit.py --check`.
 
 ![search trajectory](report/figures/fig1_trajectory.png)
 
-Four scored runs are retained in full under `runs/`. `report/run_log_final_06.md`
-carries the per-iteration hypotheses, graph diffs, metrics, and recovery events;
-sibling files cover `final_03` through `final_05`.
+Seven scored runs are retained under `runs/`. `report/run_log_final_07.md` carries
+the per-iteration hypotheses, graph diffs, metrics, and recovery events; sibling
+files cover the earlier runs.
 
 ## What the agent found
 
-The converged graph is a factorisation machine over raw categorical fields, the
-static user/video side-file bundle, and a strictly-historical user-by-author
-affinity feature. Two of its four accepted moves are worth naming:
+The converged graph is a five-seed bag of factorisation machines, each over raw
+categorical fields, the static user/video side-file bundle, and a
+strictly-historical user-by-author affinity feature. Three of its moves are worth
+naming:
 
-- **`add_static_side_features_to_fm` (+0.001220).** The KuaiRand side files carry
-  30 user and 62 item columns that the baseline never touches. Hand testing had
+- **`seed_bag_incumbent_fm` (+0.003682).** The single largest gain of the
+  project, and it was unreachable until the action space changed. Seed bagging
+  needs three coordinated edits, but a hypothesis carries one patch, and every
+  intermediate graph leaves a model node whose output reaches no terminal, which
+  validation correctly rejects. The atomic `bag_node` patch makes the three edits
+  indivisible. Offline measurement had put a three-seed bag at +0.003185; the
+  agent chose five seeds and beat it.
+- **`add_static_side_features_to_fm` (+0.001220, in `final_04`).** The side files
+  carry 30 user and 62 item columns the baseline never touches. Hand testing had
   paired that bundle with LightGBM, measured +0.000084, and written it off; the
-  agent paired it with the FM instead and gained fifteen times as much. Feature
-  bundles interact with model families differently, and the agent tested a
-  pairing the human search had already discarded.
-- **`add_author_affinity_to_fm` (+0.001669).** A user-by-author historical
-  long-view rate, aggregated strictly over earlier dates. It varies within a
-  user, which matters because both scored metrics rank *within* a user: any
-  feature constant across a user's impressions cannot change their ordering.
+  agent paired it with the FM instead.
+- **`add_author_affinity_to_fm` (+0.001669, in `final_06`).** A user-by-author
+  historical long-view rate over strictly earlier dates. It varies *within* a
+  user, which is what a within-user ranking metric requires: a feature constant
+  across a user's impressions cannot reorder them.
+
+### A measured property of the model class
+
+Stacking feature bundles onto a factorisation machine does **additive damage**.
+Every extra field enters every pairwise interaction, so a weakly informative
+bundle dilutes the strong ones rather than sitting harmlessly beside them.
+Measured over three seeds, paired against the same incumbent:
+
+| added bundle | paired delta | seeds improved |
+|---|---:|---|
+| decayed author affinity (h=7) | -0.000453 | 0/3 |
+| decayed tag affinity | -0.000218 | 0/3 |
+| decayed duration-regime affinity | -0.001289 | 0/3 |
+| **all three together** | **-0.001954** | 0/3 |
+
+The sum of the individual damages is -0.001960 against a measured -0.001954 for
+the bundle: the costs add. This is why the converged graph is small, and why the
+proposer is now told to prefer removing a low-contribution bundle over adding
+another one.
+
+### A verified label property that did not help
+
+The `long_view` label has a knee at eighteen seconds: it behaves as
+`play_time >= min(duration, 18s)`, which reproduces the label for 97.81% of
+training rows, with a sharp maximum at eighteen seconds (fifteen gives 96.09%,
+twenty gives 96.70%). Encoding that structure explicitly still cost -0.000634
+across three seeds, 0/3 improved. A real property of the label is not
+automatically a useful feature, because the duration signal was already present
+and the new fields only added dilution.
 
 ## Authoritative task definition
 

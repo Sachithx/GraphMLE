@@ -190,3 +190,74 @@ def test_live_proposer_injects_registry_contracts_and_two_valid_graphs() -> None
     assert len(payload["valid_graph_examples"]) == 2
     assert payload["validation_feedback_for_reproposal"]
     assert "Respect every input/output signature" in client.instructions
+
+
+def test_bag_node_produces_a_valid_graph_in_one_patch() -> None:
+    """Seed bagging must be expressible as a single, always-valid mutation.
+
+    Building a bag from separate add_node steps is impossible: every
+    intermediate graph leaves a model node whose output reaches no terminal, and
+    validation rejects it. This asserts the atomic version both applies and
+    validates, which is what makes the largest measured gain reachable at all.
+    """
+    from agent.propose import Hypothesis, apply_hypothesis
+    from pipeline.graph import OperatorGraph
+    from pipeline.registry import default_registry
+
+    registry = default_registry()
+    graph = OperatorGraph.from_dict({
+        "nodes": [
+            {"id": "load", "type": "data.load", "params": {}, "inputs": []},
+            {"id": "raw", "type": "features.raw_categorical", "params": {}, "inputs": ["load"]},
+            {"id": "model", "type": "model.fm_baseline", "params": {"seed": 0}, "inputs": ["raw"]},
+            {"id": "out", "type": "submit.rank", "params": {}, "inputs": ["model"]},
+        ],
+        "meta": {"name": "t", "hypothesis_id": "h0"},
+    })
+    graph.validate(registry)
+
+    hypothesis = Hypothesis(
+        id="h_bag", target_node="model", rationale="seed variance reduction",
+        method_source="bagging", expected_delta=0.001, expected_cost_minutes=5.0,
+        patch={"op": "bag_node", "node": "model", "seeds": [0, 1, 2],
+               "ensemble_type": "ensemble.seed_bag"},
+    )
+    result = apply_hypothesis(graph, hypothesis, registry)
+    mutated = result.graph
+    mutated.validate(registry)
+
+    ids = {node.id for node in mutated.nodes}
+    assert {"model", "model_s1", "model_s2", "model_bag"} <= ids
+    by_id = {node.id: node for node in mutated.nodes}
+    # The ensemble consumes every replica, and the terminal reads the ensemble.
+    assert set(by_id["model_bag"].inputs) == {"model", "model_s1", "model_s2"}
+    assert tuple(by_id["out"].inputs) == ("model_bag",)
+    # Replicas differ only by seed.
+    assert {by_id[n].params["seed"] for n in ("model", "model_s1", "model_s2")} == {0, 1, 2}
+    assert tuple(by_id["model_s1"].inputs) == ("raw",)
+
+
+def test_bag_node_rejects_a_non_model_target() -> None:
+    from agent.propose import Hypothesis, apply_hypothesis
+    from pipeline.graph import GraphValidationError, OperatorGraph
+    from pipeline.registry import default_registry
+
+    registry = default_registry()
+    graph = OperatorGraph.from_dict({
+        "nodes": [
+            {"id": "load", "type": "data.load", "params": {}, "inputs": []},
+            {"id": "raw", "type": "features.raw_categorical", "params": {}, "inputs": ["load"]},
+            {"id": "model", "type": "model.fm_baseline", "params": {"seed": 0}, "inputs": ["raw"]},
+            {"id": "out", "type": "submit.rank", "params": {}, "inputs": ["model"]},
+        ],
+        "meta": {"name": "t", "hypothesis_id": "h0"},
+    })
+    hypothesis = Hypothesis(
+        id="h_bad", target_node="raw", rationale="x", method_source="y",
+        expected_delta=0.0, expected_cost_minutes=1.0,
+        patch={"op": "bag_node", "node": "raw", "seeds": [0, 1],
+               "ensemble_type": "ensemble.seed_bag"},
+    )
+    import pytest
+    with pytest.raises(GraphValidationError, match="must be a model node"):
+        apply_hypothesis(graph, hypothesis, registry)

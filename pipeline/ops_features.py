@@ -364,7 +364,67 @@ def op_user_category_affinity(
     )
 
 
-USER_ATTRIBUTE_CHOICES = ("duration_bucket", "tab", "tag", "author_id")
+LONG_VIEW_HINGE_MS = 18_000
+"""Knee in the long_view label definition.
+
+The native label behaves as ``play_time >= min(duration, 18s)``: a video at or
+under eighteen seconds must be watched essentially to the end, while a longer
+one only needs eighteen seconds. Probing the training split, that rule
+reproduces the label for 97.81% of rows, and eighteen seconds is a sharp
+maximum (fifteen gives 96.09%, twenty gives 96.70%). Quantile duration bins do
+not place a boundary there, so the piecewise structure is encoded explicitly.
+Only ``duration_ms``, a static video property, is used; ``play_time_ms`` is an
+impression outcome and is never read as a feature.
+"""
+
+
+def op_duration_hinge(
+    inputs: list[Any], params: dict[str, Any], ctx: ExecutionContext
+) -> FeatureBundle:
+    """Piecewise duration features aligned to the long_view definition."""
+    del ctx
+    data = _require_data(inputs)
+    hinge = float(params.get("hinge_ms", LONG_VIEW_HINGE_MS))
+    edges_s = [7.0, 12.0, 18.0, 30.0, 60.0]
+
+    frames: dict[str, pd.DataFrame] = {}
+    for split, source in data.frames.items():
+        duration = source["duration_ms"].to_numpy(dtype=float)
+        seconds = duration / 1000.0
+        below = np.minimum(duration, hinge) / 1000.0
+        above = np.maximum(duration - hinge, 0.0) / 1000.0
+        frames[split] = pd.DataFrame(
+            {
+                "row_id": source["row_id"].to_numpy(),
+                # Watch requirement implied by the label, in seconds.
+                "dur_hinge_below_s": below.astype(np.float32),
+                # Excess length beyond the requirement; compressed, it is heavy tailed.
+                "dur_hinge_above_log_s": np.log1p(above).astype(np.float32),
+                "dur_hinge_ratio": (below / np.maximum(seconds, 1e-6)).astype(np.float32),
+                "cat_dur_regime": np.where(duration <= hinge, "short", "long"),
+                "cat_dur_band": np.searchsorted(edges_s, seconds).astype(str),
+            }
+        )
+    lineage = FeatureLineage(frozenset({"duration_ms"}), TemporalScope.STATIC)
+    provenance = {
+        column: lineage for column in frames["train"].columns if column != "row_id"
+    }
+    return FeatureBundle(
+        "duration_hinge",
+        frames,
+        ("cat_dur_regime", "cat_dur_band"),
+        data,
+        provenance,
+    )
+
+
+USER_ATTRIBUTE_CHOICES = (
+    "duration_bucket",
+    "duration_regime",
+    "tab",
+    "tag",
+    "author_id",
+)
 
 
 def _attribute_column(
@@ -376,6 +436,13 @@ def _attribute_column(
             np.searchsorted(edges, frame["duration_ms"].to_numpy(dtype=float)),
             index=frame.index,
         ).astype(str)
+    if attribute == "duration_regime":
+        # Split at the long_view hinge rather than at a quantile: the question is
+        # whether this user finishes short clips or stays with long ones.
+        duration = frame["duration_ms"].to_numpy(dtype=float)
+        return pd.Series(
+            np.where(duration <= LONG_VIEW_HINGE_MS, "short", "long"), index=frame.index
+        )
     return frame[attribute].astype(str)
 
 
@@ -416,7 +483,9 @@ def op_user_attribute_affinity(
         )
 
     sources = frozenset({"date", "user_id", "long_view"}) | (
-        frozenset({"duration_ms"}) if attribute == "duration_bucket" else frozenset({attribute})
+        frozenset({"duration_ms"})
+        if attribute in ("duration_bucket", "duration_regime")
+        else frozenset({attribute})
     )
     return _historical_feature_bundle(
         data, prefix, params, builder, sources
@@ -691,3 +760,192 @@ def op_ablation_constant_feature(
         "ablation_constant": FeatureLineage(frozenset(), TemporalScope.STATIC)
     }
     return FeatureBundle("ablation_constant", frames, (), data, provenance)
+
+
+DECAY_ATTRIBUTE_CHOICES = (
+    "author_id",
+    "tag",
+    "tab",
+    "duration_regime",
+    "duration_bucket",
+    "video_id",
+)
+
+
+def _decayed_affinity_frame(
+    history: pd.DataFrame,
+    target: pd.DataFrame,
+    *,
+    attribute: str,
+    edges: np.ndarray | None,
+    half_life_days: float,
+    alpha: float,
+    centered: bool,
+    prefix: str,
+) -> pd.DataFrame:
+    """Exponentially decayed, shrunk user-by-attribute long-view rate.
+
+        A_ua(t) = (sum_{j<t} w(t-t_j) y_j + alpha * p_a) / (sum_{j<t} w(t-t_j) + alpha)
+        w(dt)   = 2 ** (-dt / half_life)
+
+    Only rows strictly earlier than the target date contribute, and the decayed
+    accumulators are advanced date by date, so every value is causal by
+    construction rather than by a later filtering step.
+
+    With ``centered``, the feature becomes a lift against the same user's own
+    decayed base rate, in logit space. That matters here because GAUC never
+    compares one user against another: what carries signal is whether *this*
+    attribute is better than the user's own alternatives.
+    """
+    date_column, label_column = "date", "long_view"
+    hist = history.copy()
+    tgt = target.copy()
+    hist["_attr"] = _attribute_column(hist, attribute, edges)
+    tgt["_attr"] = _attribute_column(tgt, attribute, edges)
+    hist["_user"] = hist["user_id"].astype(str)
+    tgt["_user"] = tgt["user_id"].astype(str)
+
+    daily = (
+        hist.groupby([date_column, "_user", "_attr"], sort=True, dropna=False)[label_column]
+        .agg(["sum", "count"]).reset_index()
+    )
+    daily_attr = (
+        hist.groupby([date_column, "_attr"], sort=True, dropna=False)[label_column]
+        .agg(["sum", "count"]).reset_index()
+    )
+    daily_user = (
+        hist.groupby([date_column, "_user"], sort=True, dropna=False)[label_column]
+        .agg(["sum", "count"]).reset_index()
+    )
+
+    def as_day(values):
+        # pandas may return second, microsecond, or nanosecond resolution here, so
+        # subtract the epoch and take whole days rather than dividing raw integers.
+        stamps = pd.to_datetime(values.astype(str), format="%Y%m%d")
+        return (stamps - pd.Timestamp("1970-01-01")).dt.days
+
+    for frame in (daily, daily_attr, daily_user):
+        frame["_day"] = as_day(frame[date_column])
+    target_days = as_day(tgt[date_column]).to_numpy()
+
+    pair_w: dict[tuple, float] = {}
+    pair_y: dict[tuple, float] = {}
+    attr_w: dict[str, float] = {}
+    attr_y: dict[str, float] = {}
+    user_w: dict[str, float] = {}
+    user_y: dict[str, float] = {}
+
+    rec_pair = daily.sort_values("_day").itertuples(index=False, name=None)
+    rec_attr = daily_attr.sort_values("_day").itertuples(index=False, name=None)
+    rec_user = daily_user.sort_values("_day").itertuples(index=False, name=None)
+    lists = {k: list(v) for k, v in
+             (("pair", rec_pair), ("attr", rec_attr), ("user", rec_user))}
+    ptr = {"pair": 0, "attr": 0, "user": 0}
+
+    out_rate = np.zeros(len(tgt), dtype=np.float32)
+    out_weight = np.zeros(len(tgt), dtype=np.float32)
+    current_day = None
+
+    def decay_all(factor: float) -> None:
+        for store in (pair_w, pair_y, attr_w, attr_y, user_w, user_y):
+            for key in store:
+                store[key] *= factor
+
+    for day in sorted(np.unique(target_days)):
+        if current_day is None:
+            current_day = day
+        elif day > current_day:
+            decay_all(2.0 ** (-(day - current_day) / half_life_days))
+            current_day = day
+        # Absorb every history day strictly earlier than the target day.
+        for name, (wstore, ystore, keyidx) in (
+            ("pair", (pair_w, pair_y, (1, 2))),
+            ("attr", (attr_w, attr_y, (1,))),
+            ("user", (user_w, user_y, (1,))),
+        ):
+            records = lists[name]
+            while ptr[name] < len(records) and records[ptr[name]][-1] < day:
+                rec = records[ptr[name]]
+                gap = day - rec[-1]
+                weight = 2.0 ** (-gap / half_life_days)
+                key = rec[keyidx[0]] if len(keyidx) == 1 else (rec[keyidx[0]], rec[keyidx[1]])
+                positives, count = float(rec[-3]), float(rec[-2])
+                wstore[key] = wstore.get(key, 0.0) + weight * count
+                ystore[key] = ystore.get(key, 0.0) + weight * positives
+                ptr[name] += 1
+
+        positions = np.flatnonzero(target_days == day)
+        users_at = tgt["_user"].to_numpy()
+        attrs_at = tgt["_attr"].to_numpy()
+        global_w = sum(attr_w.values()) or 0.0
+        global_y = sum(attr_y.values()) or 0.0
+        global_rate = global_y / global_w if global_w else 0.0
+        for pos in positions:
+            u, a = users_at[pos], attrs_at[pos]
+            prior_w, prior_y = attr_w.get(a, 0.0), attr_y.get(a, 0.0)
+            prior = prior_y / prior_w if prior_w else global_rate
+            w = pair_w.get((u, a), 0.0)
+            yv = pair_y.get((u, a), 0.0)
+            rate = (yv + alpha * prior) / (w + alpha) if (w + alpha) else prior
+            if centered:
+                uw, uy = user_w.get(u, 0.0), user_y.get(u, 0.0)
+                base = (uy + alpha * global_rate) / (uw + alpha) if (uw + alpha) else global_rate
+                eps = 1e-6
+                rate = float(
+                    np.log(np.clip(rate, eps, 1 - eps) / (1 - np.clip(rate, eps, 1 - eps)))
+                    - np.log(np.clip(base, eps, 1 - eps) / (1 - np.clip(base, eps, 1 - eps)))
+                )
+            out_rate[pos] = rate
+            out_weight[pos] = w
+
+    suffix = "lift" if centered else "rate"
+    return pd.DataFrame({
+        "row_id": tgt["row_id"].to_numpy(),
+        f"{prefix}_{suffix}": out_rate,
+        f"{prefix}_weight": out_weight,
+    })
+
+
+def op_decayed_affinity(
+    inputs: list[Any], params: dict[str, Any], ctx: ExecutionContext
+) -> FeatureBundle:
+    """Time-decayed, shrunk, optionally user-centred affinity for one attribute."""
+    del ctx
+    data = _require_data(inputs)
+    attribute = str(params.get("attribute", "author_id"))
+    if attribute not in DECAY_ATTRIBUTE_CHOICES:
+        raise ValueError(
+            f"unsupported attribute {attribute!r}; choose from {list(DECAY_ATTRIBUTE_CHOICES)}"
+        )
+    half_life = float(params.get("half_life_days", 7.0))
+    if half_life <= 0:
+        raise ValueError("half_life_days must be positive")
+    alpha = float(params.get("alpha", 20.0))
+    centered = bool(params.get("centered", True))
+
+    edges: np.ndarray | None = None
+    if attribute == "duration_bucket":
+        buckets = int(params.get("buckets", 10))
+        train_duration = data.frames["train"]["duration_ms"].to_numpy(dtype=float)
+        edges = np.quantile(train_duration, np.linspace(0, 1, buckets + 1)[1:-1])
+
+    prefix = f"decay_{attribute}_h{half_life:g}"
+    history = data.frames["train"]
+    frames = {
+        split: _decayed_affinity_frame(
+            history, target, attribute=attribute, edges=edges,
+            half_life_days=half_life, alpha=alpha, centered=centered, prefix=prefix,
+        )
+        for split, target in data.frames.items()
+    }
+    for split, frame in frames.items():
+        if not frame["row_id"].equals(data.frames[split]["row_id"]):
+            raise RuntimeError(f"decayed affinity violated row alignment on {split}")
+    sources = frozenset({"date", "user_id", "long_view"}) | (
+        frozenset({"duration_ms"})
+        if attribute in ("duration_bucket", "duration_regime")
+        else frozenset({attribute})
+    )
+    lineage = FeatureLineage(sources, TemporalScope.STRICTLY_EARLIER)
+    provenance = {c: lineage for c in frames["train"].columns if c != "row_id"}
+    return FeatureBundle(prefix, frames, (), data, provenance)

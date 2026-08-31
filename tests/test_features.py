@@ -177,3 +177,68 @@ def test_static_side_features_survive_unknown_ids(tmp_path) -> None:
     assert len(train) == 2
     assert train["cat_su_user_active_degree"].tolist() == ["full_active", "UNK"]
     assert train["cat_sv_video_type"].tolist() == ["NORMAL", "UNK"]
+
+
+def test_decayed_affinity_is_causal_and_recency_weighted() -> None:
+    """Decayed affinity must never see the target day, and must favour recency.
+
+    The day arithmetic is the fragile part: pandas may hand back second,
+    microsecond, or nanosecond resolution for the same input, so the day index is
+    asserted behaviourally rather than trusted.
+    """
+    from pipeline.ops_features import _decayed_affinity_frame
+
+    history = pd.DataFrame({
+        "date": [20220408, 20220409],
+        "user_id": ["u0", "u0"],
+        "author_id": ["a", "a"],
+        "long_view": [1, 0],
+        "duration_ms": [1000, 1000],
+    })
+    target = pd.DataFrame({
+        "row_id": [0, 1, 2],
+        "date": [20220408, 20220409, 20220410],
+        "user_id": ["u0", "u0", "u0"],
+        "author_id": ["a", "a", "a"],
+        "duration_ms": [1000, 1000, 1000],
+    })
+
+    def build(half_life: float):
+        return _decayed_affinity_frame(
+            history, target, attribute="author_id", edges=None,
+            half_life_days=half_life, alpha=0.0, centered=False, prefix="d",
+        )
+
+    slow = build(7.0)
+    # The first target day has no strictly-earlier history at all.
+    assert slow["d_weight"][0] == 0.0
+    # The second sees only the first day, which was a positive.
+    assert abs(slow["d_rate"][1] - 1.0) < 1e-9
+    # The third sees one positive and one negative, so it must lie strictly between.
+    assert 0.0 < slow["d_rate"][2] < 1.0
+
+    # A short half-life discounts the older positive, pulling the rate down.
+    fast = build(0.5)
+    assert fast["d_rate"][2] < slow["d_rate"][2]
+
+
+def test_decayed_affinity_centering_cancels_the_user_base_rate() -> None:
+    """With one author, the lift against the user's own rate must vanish."""
+    from pipeline.ops_features import _decayed_affinity_frame
+
+    history = pd.DataFrame({
+        "date": [20220408, 20220409],
+        "user_id": ["u0", "u0"],
+        "author_id": ["a", "a"],
+        "long_view": [1, 0],
+        "duration_ms": [1000, 1000],
+    })
+    target = pd.DataFrame({
+        "row_id": [0], "date": [20220410], "user_id": ["u0"],
+        "author_id": ["a"], "duration_ms": [1000],
+    })
+    built = _decayed_affinity_frame(
+        history, target, attribute="author_id", edges=None,
+        half_life_days=7.0, alpha=5.0, centered=True, prefix="d",
+    )
+    assert abs(built["d_lift"][0]) < 1e-9

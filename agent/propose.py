@@ -53,6 +53,23 @@ class RewirePatch(StrictModel):
     inputs: list[str]
 
 
+class BagNodePatch(StrictModel):
+    """Atomically seed-bag one model node.
+
+    Seed bagging needs three coordinated edits: replicate the model under new
+    seeds, insert an ensemble over the replicas, and rewire the original
+    consumers. A one-patch-per-hypothesis action space cannot express that as
+    separate steps, because each intermediate graph has an unreachable node and
+    is correctly rejected. Making the whole thing one patch keeps every
+    intermediate state valid.
+    """
+
+    op: Literal["bag_node"]
+    node: str = Field(min_length=1)
+    seeds: list[int] = Field(min_length=2, max_length=8)
+    ensemble_type: Literal["ensemble.seed_bag", "ensemble.rank_average"] = "ensemble.seed_bag"
+
+
 class RegisterFeaturePatch(StrictModel):
     op: Literal["register_feature"]
     node: NodeDefinition
@@ -67,6 +84,7 @@ Patch = Annotated[
         AddNodePatch,
         RemoveNodePatch,
         RewirePatch,
+        BagNodePatch,
         RegisterFeaturePatch,
     ],
     Field(discriminator="op"),
@@ -133,6 +151,13 @@ class LLMRewirePatch(StrictModel):
     inputs: list[str]
 
 
+class LLMBagNodePatch(StrictModel):
+    op: Literal["bag_node"]
+    node: str = Field(min_length=1)
+    seeds: list[int]
+    ensemble_type: Literal["ensemble.seed_bag", "ensemble.rank_average"]
+
+
 class LLMRegisterFeaturePatch(StrictModel):
     op: Literal["register_feature"]
     node: LLMNodeDefinition
@@ -146,6 +171,7 @@ LLMPatch = Union[
     LLMAddNodePatch,
     LLMRemoveNodePatch,
     LLMRewirePatch,
+    LLMBagNodePatch,
     LLMRegisterFeaturePatch,
 ]
 
@@ -199,6 +225,7 @@ def llm_hypothesis_schema(registry: OperatorRegistry) -> type[LLMHypothesis]:
         registry_add,
         LLMRemoveNodePatch,
         LLMRewirePatch,
+        LLMBagNodePatch,
         registry_feature,
     ]
     return create_model(
@@ -252,8 +279,15 @@ Search strategy, ordered by observed effect size on this benchmark:
   Keep the incumbent and add to it.
 - Seed variance is comparable to the real signal here: the baseline's own five-seed
   std is 0.0008, and genuine improvements are of the same order. Averaging several
-  seeds of the incumbent through ensemble.seed_bag reduces that variance directly and
-  is usually the single largest gain available. Consider it before new architectures.
+  seeds of the incumbent reduces that variance directly and is usually the single
+  largest gain available. Use the bag_node patch, which replicates a model node
+  across seeds and inserts the ensemble in one atomic mutation; three to five seeds
+  is normally enough. Consider it before trying new architectures.
+- Adding a feature bundle to a factorisation machine is not free: every extra field
+  enters every pairwise interaction, so a weakly informative bundle dilutes the
+  strong ones. Measured on this benchmark, the damage from stacking bundles is
+  additive. Prefer removing a bundle that ablation shows contributes little over
+  adding another one.
 - Combining decorrelated models through ensemble.rank_average can beat either
   component, and a model that is weaker on its own can still earn weight if it makes
   different errors. Judge a candidate by what it adds to the incumbent, not by its
@@ -545,6 +579,48 @@ def apply_hypothesis(
                 consumer["inputs"] = [patch.node.id]
             elif patch.node.id not in consumer["inputs"]:
                 consumer["inputs"].append(patch.node.id)
+    elif patch.op == "bag_node":
+        if patch.node not in by_id:
+            raise GraphValidationError(f"bag_node target does not exist: {patch.node}")
+        target = by_id[patch.node]
+        if not str(target["type"]).startswith("model."):
+            raise GraphValidationError(
+                f"bag_node target must be a model node, got {target['type']}"
+            )
+        seeds = list(dict.fromkeys(int(s) for s in patch.seeds))
+        if len(seeds) < 2:
+            raise GraphValidationError("bag_node needs at least two distinct seeds")
+        bag_id = f"{patch.node}_bag"
+        if bag_id in by_id:
+            raise GraphValidationError(f"bag_node ensemble id already exists: {bag_id}")
+        # Consumers of the original node now read the ensemble instead.
+        consumers = [n for n in nodes if patch.node in n["inputs"]]
+        replicas: list[str] = []
+        for index, seed in enumerate(seeds):
+            if index == 0:
+                target["params"] = {**target["params"], "seed": seed}
+                replicas.append(patch.node)
+                continue
+            replica_id = f"{patch.node}_s{seed}"
+            if replica_id in by_id:
+                raise GraphValidationError(f"bag_node replica id already exists: {replica_id}")
+            nodes.append({
+                "id": replica_id,
+                "type": target["type"],
+                "params": {**target["params"], "seed": seed},
+                "inputs": list(target["inputs"]),
+            })
+            replicas.append(replica_id)
+        nodes.append({
+            "id": bag_id,
+            "type": patch.ensemble_type,
+            "params": {},
+            "inputs": replicas,
+        })
+        for consumer in consumers:
+            consumer["inputs"] = [
+                bag_id if value == patch.node else value for value in consumer["inputs"]
+            ]
     elif patch.op == "remove_node":
         if patch.node not in by_id:
             raise GraphValidationError(f"remove_node target does not exist: {patch.node}")

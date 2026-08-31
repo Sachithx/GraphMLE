@@ -87,7 +87,7 @@ OPERATOR_PARAMETERS: dict[str, dict[str, str]] = {
         "smoothing": "float, default 0, prior-count smoothing",
     },
     "features.user_attribute_affinity": {
-        "attribute": "duration_bucket | tab | tag | author_id, default duration_bucket",
+        "attribute": "duration_bucket | duration_regime | tab | tag | author_id, default duration_bucket",
         "buckets": "int, default 10, duration quantile buckets when attribute=duration_bucket",
         "smoothing": "float, default 0, prior-count smoothing",
     },
@@ -96,6 +96,16 @@ OPERATOR_PARAMETERS: dict[str, dict[str, str]] = {
     },
     "features.temporal": {},
     "features.static_side": {},
+    "features.decayed_affinity": {
+        "attribute": "author_id | tag | tab | duration_regime | duration_bucket | video_id",
+        "half_life_days": "float, default 7, exponential decay half-life",
+        "alpha": "float, default 20, Bayesian shrinkage toward the attribute prior",
+        "centered": "bool, default true, express as a logit lift over the user's own base rate",
+        "buckets": "int, default 10, only when attribute=duration_bucket",
+    },
+    "features.duration_hinge": {
+        "hinge_ms": "float, default 18000, knee in the long_view label definition",
+    },
     "features.generated": {
         "module_path": "string, supplied by register_feature; do not invent",
         "builder_params": "object encoded as parameter entries",
@@ -117,6 +127,20 @@ OPERATOR_PARAMETERS: dict[str, dict[str, str]] = {
         "k": "int, default 16",
         "l2": "float, default 1e-6",
         "numeric_bins": "int, default 32, train-fitted quantile bins for numeric feature fields",
+    },
+    "model.fm_pairwise": {
+        "seed": "int",
+        "k": "int, default 16",
+        "lr": "float, default 0.001, pointwise stage",
+        "epochs": "int, default 40, pointwise stage",
+        "patience": "int, default 4, pointwise stage",
+        "pairwise_lr": "float, default 0.0002, fine-tune stage",
+        "pairwise_epochs": "int, default 6",
+        "pairwise_patience": "int, default 2",
+        "pairs_per_user": "int, default 4, sampled same-user pairs per user per epoch",
+        "numeric_bins": "int, default 32",
+        "batch_size": "int, default 8192",
+        "l2": "float, default 1e-6",
     },
     "model.lightgbm_binary": {
         "seed": "int",
@@ -211,6 +235,8 @@ def default_registry() -> OperatorRegistry:
     from .ops_ensemble import op_rank_average, op_seed_bag
     from .ops_features import (
         op_data_load,
+        op_decayed_affinity,
+        op_duration_hinge,
         op_ablation_constant_feature,
         op_generated_feature,
         op_item_popularity,
@@ -225,6 +251,7 @@ def default_registry() -> OperatorRegistry:
     from .ops_models import (
         op_ablation_constant_model,
         op_fm_baseline,
+        op_fm_pairwise,
         op_lightgbm_binary,
         op_lightgbm_rank,
         op_setwise_rank,
@@ -243,9 +270,12 @@ def default_registry() -> OperatorRegistry:
         ("features.video_duration", (ValueType.DATA,), ValueType.FEATURES, op_video_duration, False),
         ("features.temporal", (ValueType.DATA,), ValueType.FEATURES, op_temporal, False),
         ("features.static_side", (ValueType.DATA,), ValueType.FEATURES, op_static_side_features, False),
+        ("features.duration_hinge", (ValueType.DATA,), ValueType.FEATURES, op_duration_hinge, False),
+        ("features.decayed_affinity", (ValueType.DATA,), ValueType.FEATURES, op_decayed_affinity, False),
         ("features.generated", (ValueType.DATA,), ValueType.FEATURES, op_generated_feature, False),
         ("features.ablation_constant", (ValueType.DATA,), ValueType.FEATURES, op_ablation_constant_feature, False),
         ("model.fm_baseline", (ValueType.FEATURES,), ValueType.PREDICTIONS, op_fm_baseline, True),
+        ("model.fm_pairwise", (ValueType.FEATURES,), ValueType.PREDICTIONS, op_fm_pairwise, True),
         ("model.lightgbm_binary", (ValueType.FEATURES,), ValueType.PREDICTIONS, op_lightgbm_binary, True),
         ("model.lightgbm_rank", (ValueType.FEATURES,), ValueType.PREDICTIONS, op_lightgbm_rank, True),
         ("model.torch_deepfm", (ValueType.FEATURES,), ValueType.PREDICTIONS, op_torch_deepfm, True),
